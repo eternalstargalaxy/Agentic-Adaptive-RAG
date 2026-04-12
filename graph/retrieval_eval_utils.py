@@ -53,23 +53,67 @@ def first_relevant_rank(relevance_flags: Iterable[int], k: int | None = None) ->
     return None
 
 
-def evaluate_documents(documents: List[Any], sample: Dict[str, Any], k: int) -> Dict[str, float | int | None]:
-    flags = build_relevance_flags(documents, sample)
-    rank = first_relevant_rank(flags, k)
+def score_retrieval_flags(
+    relevance_flags: Iterable[int],
+    recall_k: int = 5,
+    ndcg_k: int = 10,
+    mrr_k: int = 10,
+) -> Dict[str, float | int | None]:
+    flags = list(relevance_flags)
+    max_k = max(recall_k, ndcg_k, mrr_k)
+    rank = first_relevant_rank(flags, max_k)
     return {
-        "recall@k": recall_at_k(flags, k),
-        "ndcg@k": ndcg_at_k(flags, k),
-        "mrr@k": mrr_at_k(flags, k),
-        "hit@k": 1 if rank is not None else 0,
+        f"recall@{recall_k}": recall_at_k(flags, recall_k),
+        f"ndcg@{ndcg_k}": ndcg_at_k(flags, ndcg_k),
+        f"mrr@{mrr_k}": mrr_at_k(flags, mrr_k),
+        f"hit@{max_k}": 1 if rank is not None else 0,
         "top1_hit": 1 if rank == 1 else 0,
-        "relevant_hits@k": sum(flags[:k]),
+        f"relevant_hits@{max_k}": sum(flags[:max_k]),
         "first_relevant_rank": rank,
     }
+
+
+def evaluate_documents(documents: List[Any], sample: Dict[str, Any], k: int) -> Dict[str, float | int | None]:
+    flags = build_relevance_flags(documents, sample)
+    return score_retrieval_flags(flags, recall_k=k, ndcg_k=k, mrr_k=k)
+
+
+def evaluate_documents_with_cutoffs(
+    documents: List[Any],
+    sample: Dict[str, Any],
+    recall_k: int = 5,
+    ndcg_k: int = 10,
+    mrr_k: int = 10,
+) -> Dict[str, float | int | None]:
+    flags = build_relevance_flags(documents, sample)
+    return score_retrieval_flags(
+        flags,
+        recall_k=recall_k,
+        ndcg_k=ndcg_k,
+        mrr_k=mrr_k,
+    )
 
 
 def evaluate_sample(retriever: Any, sample: Dict[str, Any], k: int) -> Dict[str, float]:
     documents = retriever.invoke(sample["query"])
     return evaluate_documents(documents, sample, k)
+
+
+def evaluate_sample_with_cutoffs(
+    retriever: Any,
+    sample: Dict[str, Any],
+    recall_k: int = 5,
+    ndcg_k: int = 10,
+    mrr_k: int = 10,
+) -> Dict[str, float | int | None]:
+    documents = retriever.invoke(sample["query"])
+    return evaluate_documents_with_cutoffs(
+        documents,
+        sample,
+        recall_k=recall_k,
+        ndcg_k=ndcg_k,
+        mrr_k=mrr_k,
+    )
 
 
 def summarize_by_field(rows: Iterable[Dict[str, Any]], field: str) -> Dict[str, Dict[str, float]]:

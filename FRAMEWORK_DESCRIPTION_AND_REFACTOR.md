@@ -313,6 +313,8 @@
 - 训练前 baseline：`scripts/retrieval_eval.py`
 - 训练前后对比：`scripts/compare_query_tower_baseline.py`
 - 路由升级率统计：`scripts/compute_route_upgrade_stats.py`
+- 路由升级率前后对比：`scripts/compare_route_upgrade_baseline.py`
+- 统一训练前后总报告：`scripts/compare_training_before_after.py`
 - 路由历史状态：`graph/state.py`
 - 路由历史写入：`graph/nodes/rewrite_query.py`
 - 公共评测工具：`graph/retrieval_eval_utils.py`
@@ -322,8 +324,10 @@
 - `scripts/build_query_tower_training_data.py` 会基于现有医学语料、当前混合检索器和种子 query，自动构造 `(query, positive document, confusable negative document)` 三元组。
 - 这里的 `confusable negative` 不是随便采样的负例，而是优先从当前检索器最容易混淆的候选里挖掘，因此它直接对应“医学域易混知识分离”这个训练目标。
 - `scripts/retrieval_eval.py` 用来在训练前拿到纯 baseline，并且现在可以按 `query_type` 切片，回答“当前最弱的是哪类 query”。
-- `scripts/compare_query_tower_baseline.py` 会在同一套 ChromaDB 语料、同一套 BM25 条件下，对比 base query tower 和 LoRA query tower 的 `Recall@k / NDCG@k / MRR@k`，并输出 `recovered_from_miss`、`improved_top1` 等收益来源指标。
+- `scripts/compare_query_tower_baseline.py` 会在同一套 ChromaDB 语料、同一套 BM25 条件下，对比 base query tower 和 LoRA query tower 的 `Recall@5 / NDCG@10 / MRR@10`，并输出 `recovered_from_miss`、`improved_top1` 等收益来源指标。配合 `expected_route_strategy=single_step` 过滤后，它对应的就是 `Single-Step` 路线的训练前后对比。
 - `scripts/compute_route_upgrade_stats.py` 会统计真实图执行中的 `No Retrieval -> Single-Step`、`Single-Step -> Multi-Hop` 升级率。若 LoRA 让首轮检索更准，就应该看到部分 query 不再那么容易被迫升级到更高成本路线。
+- `scripts/compare_route_upgrade_baseline.py` 会分别在“未挂 LoRA”和“已挂 LoRA”两种环境下运行图，并直接输出两种升级率的 before/after 差值。
+- `scripts/compare_training_before_after.py` 会把 `Single-Step` 的 `Recall@5 / NDCG@10 / MRR@10`，以及 `No Retrieval -> Single-Step`、`Single-Step -> Multi-Hop` 两类升级率汇总到同一份 JSON 的 `focus_summary` 中，直接回答“训前 baseline 是多少、训后提升了多少”。
 - `route_history` 被加入到 LangGraph state 后，这个升级统计基于真实执行路径，而不是静态推断。
 
 ## 4. 简历点逐条对照
@@ -504,13 +508,13 @@
 2. 先用 `scripts/retrieval_eval.py` 在训练前拿到 baseline，并按 `query_type` 找到最弱 query 类型
 3. 再对 `BGE-M3 query tower` 做 `LoRA`
 4. 训练完成后用 `scripts/compare_query_tower_baseline.py` 对比：
-   - `Recall@k`
-   - `NDCG@k`
-   - `MRR@k`
+   - `Recall@5`
+   - `NDCG@10`
+   - `MRR@10`
    - `recovered_from_miss`
    - `improved_top1`
    - 各类 query 切片表现
-5. 再用 `scripts/compute_route_upgrade_stats.py` 看：
+5. 再用 `scripts/compare_route_upgrade_baseline.py` 看：
    - `No Retrieval -> Single-Step` 的升级比例
    - `Single-Step -> Multi-Hop` 的升级比例
 6. 如果 LoRA 提升有限，再考虑更复杂的 adaptive 方案
@@ -522,12 +526,12 @@
 2. 为什么先做 LoRA：
    LoRA 更适合作为第一轮低风险、可归因的实验。它不会破坏现有 ChromaDB 文档向量，只改 query 侧，方便前后对照。
 3. 训前 baseline 是多少：
-   训练前 baseline 由 `scripts/retrieval_eval.py` 输出；训练完成后的 before/after 对照由 `scripts/compare_query_tower_baseline.py` 统一输出。两者都基于同一套评测样本和同一套检索链路。
+   `Single-Step` 路线的训练前 baseline 由 `scripts/retrieval_eval.py` 或 `scripts/compare_query_tower_baseline.py` 中的 `baseline_summary` 给出，核心是 `Recall@5 / NDCG@10 / MRR@10`。两者都基于同一套评测样本和同一套检索链路。
 4. 提升来自哪里：
    不是只看一个总分，而是同时看三层证据：
-   - 检索层：`Recall@k / NDCG@k / MRR@k`
+   - 检索层：`Single-Step` 的 `Recall@5 / NDCG@10 / MRR@10`
    - 样本层：`recovered_from_miss`、`improved_top1`
-   - 路由层：`Single-Step -> Multi-Hop` 升级率是否下降
+   - 路由层：`No Retrieval -> Single-Step` 和 `Single-Step -> Multi-Hop` 升级率是否下降
 5. 如果上述三层证据都显示收益明显，再进入更复杂的 adaptive 方案，因果链会更清晰。
 
 ## 6. 当前仍未完全实现或仍需强化的点
@@ -577,10 +581,11 @@
    - `Single-Step` 路线提升了哪些 query
    - 哪些 query 从 miss 变成了 hit
    - 哪些 query 的 top1 相关文档更靠前
-6. 运行 `scripts/compute_route_upgrade_stats.py`，确认：
+6. 运行 `scripts/compare_route_upgrade_baseline.py`，确认：
    - `No Retrieval` 升级到 `Single-Step` 的比例
    - `Single-Step` 升级到 `Multi-Hop` 的比例
-7. 如果 single-step 提升稳定，再补：
+7. 或直接运行 `scripts/compare_training_before_after.py`，一并生成训练前/训练后总报告
+8. 如果 single-step 提升稳定，再补：
    - 缩写扩展
    - reranker
    - citation
