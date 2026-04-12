@@ -1,405 +1,502 @@
-# Agentic Adaptive RAG 框架说明与医学域化改造记录
+# Agentic Adaptive RAG 框架说明、医学域化设计与简历点对照
 
-## 1. 项目当前特点与基础定位
+## 1. 项目定位
 
-这个仓库的核心价值，不在于它已经是一个完整的医学 RAG 成品，而在于它已经具备了一个非常适合继续扩展的 `LangGraph 自适应闭环骨架`。当前项目最有价值的几个特点是：
+这个项目当前的目标，不再是一个通用 demo，而是逐步演进为一个更贴近你简历描述的 `医学域自适应 RAG 系统`。它的核心思路是：
 
-1. 不是“检索一次、生成一次”的静态 RAG，而是有状态的闭环工作流。
-2. 已经具备 `query rewrite -> retrieve -> grade -> generate -> evaluate -> retry` 的基本控制流。
-3. 检索和生成之间不是硬连接，而是通过多个 grader 和条件跳转来决定下一步动作。
-4. 当前代码已经具备继续扩展成“多轮检索 + 多工具协同 + 评测驱动优化”的工程基础。
+1. 用 `LangGraph` 组织多节点闭环，而不是单次检索生成。
+2. 用 `混合检索 + 多层评估 + 自适应重试` 来提升答案准确性和相关性。
+3. 在医学场景下，优先保证：
+   - 检索来源可信
+   - query 对医学术语空间的对齐能力
+   - 生成答案的可验证性
 
-这意味着它非常适合从一个通用 demo 版本，继续演进到你简历里那类“面向医学复杂查询的自适应 RAG 系统”。
+因此，本项目当前分成两批推进：
 
-换句话说，这个项目现在的价值是：
+1. 第一批：医学域底座搭建
+   - 医学语料接入
+   - `ChromaDB` 本地向量库
+   - `BM25 + BGE-M3 + RRF`
+   - Tavily 网络搜索和医学白名单
+   - MCP client 抽象层
+   - retrieval / generation eval 脚手架
 
-- `图结构已经对`
-- `闭环已经有`
-- `后续增强点很明确`
+2. 第二批：表示学习增强
+   - `BGE-M3 query tower LoRA`
+   - 训练数据格式
+   - baseline 对比与提升归因
 
-所以这轮改造的目标，不是直接把它变成最终版，而是先把它改造成一个更合理的“医学域化第一阶段底座”。
+## 2. 当前整体架构
 
-## 2. 为什么先做医学域化，而不是直接训练 Query Tower
+当前工作流主线如下：
 
-你前面提到希望在 embed 过程里加入双塔结构，并针对 query 侧的 `BGE-M3 tower` 做医学数据集微调。这个方向是合理的，但不适合作为第一步直接落地，原因有三点：
+1. `rewrite_query`
+2. `route`
+3. `retrieve`
+4. `grade_documents`
+5. `retrieve / websearch / generate`
+6. `evaluate_generation`
+7. `rewrite / regenerate / websearch / end`
 
-1. 当前仓库还缺少稳定的医学语料基础。
-   如果 corpus 还不是医学语料，或者医学语料组织方式还不稳定，先训练 query tower，最后很难判断收益到底来自模型，还是来自语料变化。
+其中，第一轮检索已经对齐到：
 
-2. 当前仓库还缺少统一的 retrieval benchmark。
-   如果没有训练前 baseline，例如 `Recall@5`、`NDCG@10`、`MRR@10`，后面即使训出一个 query tower，也很难清楚说明“为什么要训”“训前差在哪里”“提升来自哪里”。
+- `BM25 稀疏检索`
+- `BGE-M3 稠密检索`
+- `RRF 融合`
+- `HyDE 查询扩展`
 
-3. 当前外部知识接入方式还没有分层。
-   如果后续要接 PubMed、权威医学网页、甚至院内知识库，最好先把工具层抽象干净，再考虑更强的表示学习。
+多轮补检和网络搜索也已经具备：
 
-所以这一轮更合理的顺序是：
+- LLM 信息缺口分析
+- 子查询补全
+- Tavily 搜索回退
+- 医学站点白名单控制
 
-1. 先完成医学语料接入
-2. 先补 retrieval eval 骨架
-3. 先把外部搜索能力抽象成 MCP client 边界
-4. 先建立“训练前 baseline”
-5. 第二批再做 `BGE-M3 query tower LoRA`
+## 3. 简历描述逐点对照与模块映射
 
-这个顺序的好处是，后面你就能比较完整地回答：
+这一节按你的简历描述逐条检查，说明是否实现、对应模块在哪里、这一步的作用是什么。
 
-- 为什么需要训练 query tower
-- 不训练时检索错误主要发生在哪里
-- 训练后到底提升了哪些 query 类型
-- 是缩写问题、术语问题、症状问法问题，还是多跳问题得到改善
+### 3.1 通过混合检索、多层评估和自适应重试机制提高 RAG 系统的准确性和相关性
 
-## 3. 医学域化方案设计
+实现说明：
 
-### 3.1 Corpus 设计
+- 已实现。
+- 当前系统已经是一个闭环式的 adaptive RAG，而不是单步流水线。
 
-这一阶段的 corpus 目标不是一步到位接入超大规模医学库，而是先把项目改造成“能够稳定承载医学语料”的结构。
+模块位置：
 
-本轮采用两层设计：
-
-1. `medical_demo` 语料配置
-   当前先接入高可信公开医学页面，优先选择 `MedlinePlus / NIH / CDC / WHO` 一类来源，作为演示版医学 corpus。
-
-2. 后续可扩展语料层
-   后续第二阶段可以继续接入：
-   - PubMed 摘要库
-   - BEIR `nfcorpus`
-   - 自建医学 QA 检索集
-   - 指南类 PDF / HTML 知识库
-
-这样做的原因是：
-
-1. 先用高可信公开医学页面完成结构迁移，风险低、可运行性高。
-2. 后续接入 PubMed 和 benchmark 时，不需要推翻现有 ingestion 和 retriever 结构。
-
-对应作用：
-
-- 让项目从“AI 博客 demo 语料”切换为“医学域可扩展语料”
-- 为后续 query tower 微调准备更合理的数据环境
-- 为后续医学 benchmark 和 source policy 打基础
-
-### 3.2 Benchmark 设计
-
-医学域化后，项目不能只看“能不能答出来”，必须明确区分 `检索质量` 和 `生成质量`。
-
-因此建议 benchmark 分两层：
-
-1. 检索层 benchmark
-   - `Recall@5`
-   - `NDCG@10`
-   - `MRR@10`
-
-2. 生成层 benchmark
-   - `faithfulness`
-   - `answer relevancy`
-   - `citation precision`
-
-同时再做几类专项切片：
-
-1. 医学缩写
-   例如：`COPD`、`HFpEF`、`RA`
-2. 症状口语化问法
-   例如：“胸闷喘不过气”“经常口渴尿多”
-3. 检查项与实验室指标
-   例如：`HbA1c`、`CBC`
-4. 疾病分型或治疗路径
-   例如：慢阻肺分级、心衰类型
-
-这样设计的原因是：
-
-1. 医学 query 的失败模式高度集中，不同错误类型的优化方向不同。
-2. 只有把检索和生成拆开评，后面训练 query tower 时才知道收益到底落在哪一层。
+- 工作流编排：`graph/graph.py`
+- 共享状态：`graph/state.py`
+- 生成评估：`graph/evaluation.py`
+- 生成重试：`graph/nodes/evaluate_generation.py`
 
 对应作用：
 
-- 让后续训练和改造可以用数据说话
-- 避免“整体看着变好，但不知道为什么”
-- 为论文式/简历式表述提供可复用指标
+- 让系统在答案不可靠时继续补证据或重写问题。
+- 将“相关性”和“真实性”纳入控制流，而不是只看一次生成结果。
 
-### 3.3 Query Tower 训练策略
+### 3.2 首轮采用 RRF 融合 BM25 稀疏检索与 BGE-M3 稠密向量检索
 
-这部分属于第二批改造，但这次已经先把设计方案明确下来。
+实现说明：
 
-#### 为什么是 Query Tower，而不是一开始同时训练双塔
+- 已实现。
+- 本地向量库使用 `ChromaDB`。
+- 稀疏检索使用 `BM25Retriever`。
+- 稠密检索使用 `BGE-M3`。
+- 两路召回通过 `RRF` 融合。
 
-因为你的目标更像是“让用户 query 更好对齐医学表达空间”，而不是一开始就重做整个向量库。医学场景里，最常见的问题往往是：
+模块位置：
 
-1. 用户使用口语表达，文档使用标准医学术语
-2. 用户使用缩写，语料使用全称
-3. 用户 query 很短、模糊、关键词不足
-
-这些问题首先影响的是 `query side representation`，所以第一步更适合先做 query tower 适配。
-
-#### 为什么第二阶段建议先用 LoRA
-
-当前更建议：
-
-- 第一版先用 `LoRA`
-- 暂时不直接上更复杂的 adaptive 方案
-
-原因：
-
-1. `LoRA` 更稳，实验可复现性更好。
-2. 工程接入成本更低，更适合当前项目阶段。
-3. 更容易和 baseline 对比，清楚说明“训练带来了什么变化”。
-4. 当前项目的主要问题还不在参数规模不足，而在语料、工具和评测闭环还没补齐。
-
-#### 什么情况下再考虑 adaptive
-
-当下面条件同时出现时，再考虑 `AdaLoRA` 或其它 adaptive 方案会更合理：
-
-1. 已经有稳定 baseline
-2. LoRA 提升有限
-3. 已经确认收益瓶颈来自表示学习，而不是 reranker、source policy 或 query rewrite
-
-#### 第二批训练建议
-
-1. 先冻结 doc tower
-2. 只对 query tower 做 `LoRA`
-3. 训练数据优先使用：
-   - 正样本：医学 query 与 gold evidence
-   - 负样本：BM25 hard negatives + dense hard negatives
-4. 训练后重新评估：
-   - `Recall@5`
-   - `NDCG@10`
-   - query 类型切片表现
+- 稠密模型：`model.py`
+- BGE-M3 双塔 embedding 封装：`graph/embeddings/bge_m3.py`
+- ChromaDB 建库与混合检索：`ingestion.py`
 
 对应作用：
 
-- 先用最小训练改动换取最可解释的提升
-- 避免过早把系统复杂度堆高
-- 为后续是否继续 joint tuning 提供依据
+- `BM25` 擅长关键词和医学术语匹配。
+- `BGE-M3` 更擅长语义对齐和口语 query。
+- `RRF` 融合可以降低单一路径召回不稳定的问题。
 
-### 3.4 MCP 接入边界设计
+### 3.3 针对短 / 模糊 Query 采用 HyDE 方法辅助检索
 
-MCP 这部分本轮不追求“一步到位的完整分布式协议系统”，而是先做清楚边界。
+实现说明：
 
-本轮的设计原则是：
+- 已实现。
 
-1. 先做 `MCP client 抽象层`
-2. 先把外部工具调用统一走 client
-3. 暂时不把整个项目暴露成 MCP server
+模块位置：
 
-本轮纳入 MCP 边界的工具包括：
-
-1. `search_web_general`
-   通用网页搜索
-2. `search_medical_web`
-   限定在高可信医学站点的网页搜索
-3. `search_pubmed`
-   PubMed 文献搜索
-
-这一阶段刻意不做的部分：
-
-1. 不把本地 hybrid retriever 暴露成 MCP server
-2. 不把 generation/evaluation 节点对外 server 化
-3. 不引入更复杂的远程 transport 和多进程调度
-
-这样做的原因是：
-
-1. 当前最重要的是先把工具层从 workflow 中解耦。
-2. 只要 client 边界先建立起来，后面切换成真正的 MCP transport 就不会动到 graph 的上层逻辑。
-3. 对简历叙事也更清楚：先做“可扩展工具调用抽象”，再做“协议级平台化”。
+- HyDE 生成链：`graph/chains/hyde.py`
+- 检索节点中接入：`graph/nodes/retrieve.py`
 
 对应作用：
 
-- 降低 workflow 与外部工具的耦合
-- 让 PubMed / 医学网页 / 通用 web 搜索走统一调用接口
-- 为后续真实 MCP server 接入预留结构位置
+- 当 query 太短、缺少关键词、医学实体不完整时，用假设性回答扩展检索空间。
+- 这对症状描述类 query 尤其有帮助。
 
-## 4. 第一批改造实施记录
+### 3.4 次轮由 LLM 自动识别信息缺口并生成子查询定向补全
 
-这一轮已经按上面的设计，完成了第一批工程改造。
+实现说明：
 
-### 4.1 医学语料接入
+- 已实现。
 
-新增或修改：
+模块位置：
+
+- 信息缺口分析：`graph/chains/gap_analyzer.py`
+- 文档分级和二轮检索决策：`graph/nodes/grade_documents.py`
+
+对应作用：
+
+- 不是检索失败后直接联网，而是先判断是否还能通过第二轮本地检索补齐证据。
+- 这可以减少无效联网，提高闭环的可解释性。
+
+### 3.5 多轮未达标时触发网络搜索模块保证答案准确性
+
+实现说明：
+
+- 已实现。
+- 网络搜索统一通过 `Tavily API` 接入。
+
+模块位置：
+
+- 网络搜索节点：`graph/nodes/web_search.py`
+- MCP 工具注册：`graph/mcp/registry.py`
+- Tavily provider 与医学白名单：`graph/search/providers.py`
+
+对应作用：
+
+- 当本地知识不足时，用外部信息补充。
+- 保证网络搜索不是完全开放域，而是有医学域名白名单约束。
+
+### 3.6 Multi-Agent：基于 LangGraph 实现问题改写、网络搜索、结果生成、幻觉检查和结果相关性检验模块
+
+实现说明：
+
+- 已实现。
+- 当前虽然没有使用多个独立进程 agent，但在 `LangGraph` 中已经实现了多节点、分职责的 agentic workflow。
+
+模块位置：
+
+- 问题改写：`graph/nodes/rewrite_query.py`
+- 网络搜索：`graph/nodes/web_search.py`
+- 结果生成：`graph/nodes/generate.py`
+- 幻觉评估：`graph/evaluation.py`
+- 结果相关性检验：`graph/chains/answer_grader.py`
+- 总图结构：`graph/graph.py`
+
+对应作用：
+
+- 让每个模块的职责单独可控、可替换、可评估。
+- 这比把所有判断都塞进一个 prompt 更适合工程化扩展。
+
+### 3.7 未通过则触发改写重试闭环
+
+实现说明：
+
+- 已实现。
+
+模块位置：
+
+- 闭环入口和重试路由：`graph/graph.py`
+- 生成后决策：`graph/nodes/evaluate_generation.py`
+
+对应作用：
+
+- 当答案虽然有内容，但没真正回答问题时，系统不是原地重复生成，而是先重写问题后重试。
+
+### 3.8 引入 RAGAS faithfulness 指标替代 LLM 自评，量化幻觉率
+
+实现说明：
+
+- 已补齐。
+- 当前评估逻辑已经优先使用 `RAGAS faithfulness`。
+- 仅在本地环境没有 `ragas` 或运行失败时，才回退到 LLM grader。
+
+模块位置：
+
+- 主评估逻辑：`graph/evaluation.py`
+
+对应作用：
+
+- 降低完全依赖 LLM 自评带来的不稳定性。
+- 让幻觉率评估更接近标准化指标。
+
+### 3.9 BEIR nfcorpus：基于复杂医学类数据库做验证
+
+实现说明：
+
+- 已补充脚本骨架。
+- 当前还没有在本地环境完成在线实跑，但已具备评估入口。
+
+模块位置：
+
+- BEIR nfcorpus 评测脚本：`scripts/run_beir_nfcorpus_eval.py`
+- 检索指标函数：`graph/retrieval_metrics.py`
+
+对应作用：
+
+- 为医学域检索阶段提供标准 benchmark。
+- 后续可以真实统计 `Recall@5`、`NDCG@10`、`MRR@10`。
+
+### 3.10 独立构建 Synthetic Test Set 用于评估答案生成质量
+
+实现说明：
+
+- 已补充模板和评测脚本骨架。
+
+模块位置：
+
+- Synthetic 数据模板：`data/eval/synthetic_generation_eval_template.jsonl`
+- 生成评测脚本：`scripts/evaluate_synthetic_generation.py`
+- 生成指标函数：`graph/generation_metrics.py`
+
+对应作用：
+
+- 将生成阶段评估从“主观感觉”转成可批量统计的指标。
+- 为后续 ROUGE-L / BERTScore 对比提供载体。
+
+### 3.11 生成阶段 ROUGE-L / BERTScore
+
+实现说明：
+
+- 已补充指标计算骨架。
+
+模块位置：
+
+- 指标函数：`graph/generation_metrics.py`
+- 评估脚本：`scripts/evaluate_synthetic_generation.py`
+
+对应作用：
+
+- 让生成质量可以量化比较。
+- 为后续和不同 prompt / retriever / tower 版本做对照提供基础。
+
+### 3.12 Query Tower 医学微调
+
+实现说明：
+
+- 已补充第二阶段训练方案、训练脚本和数据格式。
+- 目前属于“已落地方案与训练入口，待你准备医学训练数据后启动训练”。
+
+模块位置：
+
+- Query tower LoRA 训练脚本：`scripts/train_query_tower_lora.py`
+- 训练数据模板：`data/train/query_tower_lora_template.jsonl`
+- LoRA 推理接入口：`graph/embeddings/bge_m3.py`
+- 运行时 adapter 入口：`model.py` 中 `QUERY_TOWER_ADAPTER_PATH`
+- 训练配置示例：`configs/query_tower_lora.example.json`
+
+对应作用：
+
+- 用最小改动先提升 query 侧对医学语料空间的适配能力。
+- 不必一开始就重建整个 doc tower 和向量库。
+
+### 3.13 本地向量库用 ChromaDB
+
+实现说明：
+
+- 已实现。
+
+模块位置：
+
+- `ingestion.py`
+
+对应作用：
+
+- 提供本地持久化向量存储。
+- 支持后续不同语料 profile 的独立 collection 和持久化目录。
+
+### 3.14 网络搜索接口用 Tavily API，并加入医学域名白名单
+
+实现说明：
+
+- 已实现。
+- 当前通用搜索和医学域搜索都走 `Tavily API`。
+- 医学搜索加入白名单。
+
+模块位置：
+
+- Tavily 搜索 provider：`graph/search/providers.py`
+- 白名单：
+  - `MEDICAL_DOMAIN_WHITELIST`
+  - `PUBMED_DOMAIN_WHITELIST`
+
+当前白名单包括：
+
+- `medlineplus.gov`
+- `nih.gov`
+- `ncbi.nlm.nih.gov`
+- `pubmed.ncbi.nlm.nih.gov`
+- `cdc.gov`
+- `who.int`
+- `mayoclinic.org`
+
+对应作用：
+
+- 降低医学场景下开放网页噪声。
+- 提升检索来源可信度。
+
+## 4. 第一阶段医学域化改造已经完成的内容
+
+### 4.1 医学语料 Profile
+
+已完成：
+
+- `medical_demo` profile
+- 医学语料默认激活
+- 不同 profile 独立 Chroma collection
+
+模块位置：
 
 - `graph/corpus_profiles.py`
 - `ingestion.py`
 
-本轮做了什么：
+### 4.2 MCP Client 抽象
 
-1. 引入 `corpus profile` 机制
-2. 增加 `medical_demo` 语料配置
-3. 将持久化向量库改成按 profile 组织
-4. 默认激活医学 profile，而不是继续只使用 AI 博客语料
+已完成：
 
-为什么这样改：
+- 轻量 `InProcessMCPClient`
+- 统一 tool register / call
 
-1. 让项目从结构上具备“多领域/多语料配置”的能力
-2. 避免后续换医学语料时推翻整个 ingestion 逻辑
-
-对应作用：
-
-- 让当前项目正式进入“医学域版本”
-- 为后续 benchmark 和 query tower 训练提供语料基础
-
-### 4.2 MCP Client 抽象层
-
-新增：
+模块位置：
 
 - `graph/mcp/client.py`
 - `graph/mcp/registry.py`
 
-本轮做了什么：
+### 4.3 PubMed / 医学网页 / 通用网页搜索
 
-1. 建立了一个轻量的 `InProcessMCPClient`
-2. 用统一的 tool register / call 接口管理搜索工具
-3. 让 graph 上层只关心“调用工具”，不关心具体 provider 是谁
+已完成：
 
-为什么这样改：
+- `search_pubmed`
+- `search_medical_web`
+- `search_web_general`
 
-1. 当前最需要的是工具调用边界，而不是复杂的协议实现细节
-2. 先把依赖倒置做对，后面接真正的 MCP server 才会顺
-
-对应作用：
-
-- workflow 不再直接绑定单一搜索实现
-- 搜索工具可以继续扩展，而不需要频繁修改 graph 节点
-
-### 4.3 PubMed 与医学搜索接入
-
-新增或修改：
+模块位置：
 
 - `graph/search/providers.py`
+- `graph/mcp/registry.py`
 - `graph/nodes/web_search.py`
 
-本轮做了什么：
+### 4.4 Retrieval Eval 骨架
 
-1. 增加 `PubMedSearchProvider`
-2. 增加 `MedicalWebSearchProvider`
-3. 将原来写死的 Tavily web search，改成通过 MCP client 调度：
-   - PubMed
-   - 医学权威网页搜索
-   - 通用网页搜索
+已完成：
 
-为什么这样改：
+- `Recall@k`
+- `NDCG@k`
+- `MRR@k`
+- JSONL 模板
+- CLI 脚本
 
-1. 医学场景不能继续只依赖开放域 web search
-2. 需要先让高可信来源进入工具层
-
-对应作用：
-
-- 提高医学场景下外部知识补充的可信度
-- 为未来加入 source policy 和 citation 机制打基础
-
-### 4.4 Retrieval Eval 脚本骨架
-
-新增：
+模块位置：
 
 - `graph/retrieval_metrics.py`
 - `scripts/retrieval_eval.py`
-- `data/eval/medical_retrieval_eval_template.jsonl`
 
-本轮做了什么：
+## 5. 第二阶段：BGE-M3 Query Tower LoRA 训练方案
 
-1. 增加检索评价指标函数：
-   - `Recall@k`
-   - `NDCG@k`
-   - `MRR@k`
-2. 增加 evaluation 脚本骨架
-3. 增加医学检索模板数据格式
+### 5.1 为什么是 Query Tower LoRA
 
-为什么这样改：
+当前医学检索最可能出现的问题不是“文档库完全没有相关内容”，而是：
 
-1. 不先建立检索基线，后面训练 query tower 的收益就说不清楚
-2. 评测脚本越早落地，后续每一轮改造越容易归因
+1. query 太口语化
+2. 医学缩写与正文术语不对齐
+3. 检查项、药名、疾病分型表达不一致
 
-对应作用：
+这些问题首先体现在 `query embedding` 质量上，因此第二阶段更适合先做：
 
-- 为“训练前 baseline”提供第一版载体
-- 让第二批 LoRA 训练有明确对照组
+- 保持 doc tower 稳定
+- 只训练 query tower
+- 用 `LoRA` 先做低成本可解释增强
 
-### 4.5 路由与改写提示词同步医学化
+### 5.2 训练数据格式
 
-修改：
+当前训练数据模板路径：
 
-- `graph/chains/router.py`
-- `graph/chains/query_rewriter.py`
-- `graph/nodes/rewrite_query.py`
-- `graph/state.py`
+- `data/train/query_tower_lora_template.jsonl`
 
-本轮做了什么：
+字段设计：
 
-1. router 现在会基于当前 corpus profile 理解本地知识库范围
-2. query rewrite prompt 会显式保留医学实体、缩写、检查项、药名
-3. state 中增加了：
-   - `corpus_profile`
-   - `preferred_search_tools`
+- `query`
+- `positive_passage`
+- `hard_negative_passages`
+- `query_type`
+- `medical_entities`
+- `source`
+- `split`
 
-为什么这样改：
+这样设计的原因：
 
-1. 如果语料已经医学化，而 router 和 rewrite 还是通用 AI 语境，流程会失真
+1. `positive_passage` 直接提供正样本证据。
+2. `hard_negative_passages` 用于构造对比学习难负样本。
+3. `query_type` 方便后续做训练后分桶分析。
+4. `medical_entities` 方便分析哪些实体类型最受益。
 
-对应作用：
+### 5.3 训练脚本
 
-- 让 query rewrite、route、web search 三者围绕同一领域配置工作
+当前训练入口：
 
-## 5. 第二批改造计划：Query Tower LoRA
+- `scripts/train_query_tower_lora.py`
 
-等第一批改造跑通并拿到 baseline 后，第二批建议按下面顺序做：
+当前实现方式：
 
-1. 准备医学 retrieval benchmark
-2. 统计 baseline：
-   - `Recall@5`
-   - `NDCG@10`
-   - `MRR@10`
-3. 对 `BGE-M3 query tower` 做 `LoRA`
-4. 训练数据使用：
-   - 正样本：query 与 gold evidence
-   - 负样本：BM25 hard negatives + dense hard negatives
-5. 再做训练后对比
+1. doc tower 冻结
+2. query tower 加 LoRA
+3. query 与候选段落做对比打分
+4. 正样本放在候选第一位
+5. 用交叉熵训练 query tower 选择正样本
 
-这样设计的价值是：
+### 5.4 推理接入方式
 
-1. 能明确回答“为什么训练”
-2. 能明确回答“训练前到底差在哪里”
-3. 能明确回答“训练后提升来自哪类 query”
+当前推理接入口：
 
-这也是为什么当前阶段不直接上 adaptive 方案，而是建议 `LoRA first`。
+- `graph/embeddings/bge_m3.py`
+- `model.py`
 
-## 6. 目前仍需继续精进的点
+方式：
 
-除了这轮已经做的内容，我认为后续还值得优先推进的点包括：
+1. 文档 embedding 使用基础 BGE-M3 编码器
+2. query embedding 可加载 `QUERY_TOWER_ADAPTER_PATH`
+3. 通过同一 embedding 接口接入 ChromaDB 查询
+
+这意味着后续训练完成后，不需要改 graph 主流程，只要：
+
+1. 保存 adapter
+2. 设置 `QUERY_TOWER_ADAPTER_PATH`
+
+就能直接对比训练前后的检索结果。
+
+## 6. 为什么当前阶段不直接上 Adaptive LoRA
+
+当前更推荐先 `LoRA`，再考虑更复杂的 adaptive 方案，原因是：
+
+1. 现在最重要的是建立训练前 baseline
+2. 现在更缺的是评测闭环，而不是参数量
+3. LoRA 更适合作为第一轮可解释对比实验
+
+只有在下面条件同时满足后，再考虑 adaptive 更合理：
+
+1. baseline 已稳定
+2. LoRA 提升有限
+3. 已确认瓶颈来自表示学习，而不是 reranker 或 source policy
+
+## 7. 仍需继续精进的点
+
+后续建议继续推进：
 
 1. `reranker`
-   很多时候，`hybrid retrieval + reranker` 的收益比直接训练 embedding 更稳定。
+   - 当前还没有 cross-encoder reranker
+   - 加入后往往能比纯 embedding 微调更稳定
 
-2. `source policy`
-   医学场景下应该明确区分：
-   - PubMed
-   - 指南/权威站点
-   - 普通网页
+2. `医学缩写扩展`
+   - 当前 rewrite 已保留医学实体，但还没有专门的缩写展开模块
 
 3. `citation 机制`
-   医学 RAG 不能只给答案，最好能给出证据来源和证据粒度。
+   - 当前答案生成和 grounding 已有，但证据展示粒度还可以继续细化
 
-4. `医学缩写扩展`
-   rewrite 阶段可以进一步加入缩写展开和标准术语映射。
+4. `高风险问题保守回答`
+   - 医学治疗和诊断问题还可以增加更严格的安全策略
 
-5. `高风险问题保守回答`
-   对诊断、治疗、用药问题，应该增加更保守的回答策略。
+## 8. 当前验证状态
 
-## 7. 当前验证状态
+本轮已完成的离线验证：
 
-本轮已经完成的是：
+1. `python -m compileall .`
+2. 纯逻辑 smoke test：
+   - corpus profile
+   - retrieval metrics
 
-1. 医学域化方案设计
-2. 医学语料 profile 接入
-3. MCP client 抽象层
-4. PubMed / 医学搜索 provider
-5. retrieval eval 脚本骨架
+本轮尚未完成的在线验证：
 
-当前仍受本地环境限制的部分：
+1. BGE-M3 模型下载与建库实跑
+2. Tavily API 联网实跑
+3. BEIR nfcorpus benchmark 联网执行
+4. query tower LoRA 实际训练
 
-1. 本地尚未完整安装运行依赖
-2. 网络环境无法稳定连接 GitHub
-3. PubMed / Tavily 搜索属于联网能力，当前未做在线实跑验证
+建议下一步验证顺序：
 
-建议后续验证顺序：
-
-1. 安装依赖
+1. 安装 `requirements.txt`
 2. 配置 `.env`
 3. 执行 `python ingestion.py`
 4. 执行 `python main.py`
 5. 执行 `python scripts/retrieval_eval.py --dataset data/eval/medical_retrieval_eval_template.jsonl`
-6. 在 baseline 稳定后，再开始第二批 query tower LoRA
+6. 执行 `python scripts/run_beir_nfcorpus_eval.py`
+7. 准备训练集后执行 `python scripts/train_query_tower_lora.py`
