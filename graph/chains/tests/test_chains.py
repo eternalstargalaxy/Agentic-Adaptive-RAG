@@ -1,59 +1,33 @@
-from pprint import pprint
-import pytest
-
-from dotenv import load_dotenv
-
-load_dotenv()
-
-from graph.chains.generation import generation_chain
-from graph.chains.hallucination_grader import (GradeHallucinations,hallucination_grader)
-from graph.chains.retrieval_grader import GradeDocuments, retrieval_grader
-from graph.chains.router import RouteQuery, question_router
-from ingestion import retriever
+from graph.consts import GENERATE, RETRIEVE, WEBSEARCH
+from graph.graph import route_after_document_grading, route_after_evaluation
+from ingestion import normalize_queries
 
 
-def test_retrieval_grader_answer_yes() -> None:
-    question = "agent memory"
-    docs = retriever.invoke(question)
-    
-    doc_txt = docs[1].page_content
-    
-    res: GradeDocuments = retrieval_grader.invoke(
-        {"question": question, "document": doc_txt}
-    )
-    
-    assert res.binary_score == "yes"
-    
-def test_retrieval_grader_answer_no() -> None:
-    question = "agent memory"
-    docs = retriever.invoke(question)
-    
-    doc_txt = docs[0].page_content
-    
-    res: GradeHallucinations = hallucination_grader.invoke(
-        {"documents":docs,
-         "generation": "In order to make pizza we need to first start with the dough"}
-    )
-    
-    assert not res.binary_score
-    
-def test_router_to_vectostore() -> None:
-    question = "agent memory"
-    res: RouteQuery = question_router.invoke({"question": question})
-    
-    assert res.datasource == "vectostore"
-    
-def test_router_to_websearch() -> None:
-    question = "how to make pizza"
-    
-    res: RouteQuery = question_router.invoke({"question": question})
-    
-    assert res.datasource == "websearch"
-    
-"""
-This comprehensive test suite validates each component of our Agentic RAG system independently.
-The tests cover document relevance grading with both positive and negative cases, ensuring our grader correctly identifies relevant and irrelevant documents.
-The hallucination detection tests verify that our system can distinguish between grounded and fabricated responses.
-The router tests confirm that questions are correctly routed to vectorstore or web search based on their content.
-These tests will ensure that each component works correctly in isolation before integration into the complete workflow.
-"""
+def test_normalize_queries_removes_empty_and_duplicates() -> None:
+    assert normalize_queries([" agent memory ", "", "agent memory", "rag"]) == [
+        "agent memory",
+        "rag",
+    ]
+
+
+def test_route_after_document_grading_prefers_second_retrieval_round() -> None:
+    state = {"next_action": RETRIEVE}
+    assert route_after_document_grading(state) == RETRIEVE
+
+
+def test_route_after_document_grading_can_fallback_to_websearch() -> None:
+    state = {"next_action": WEBSEARCH}
+    assert route_after_document_grading(state) == WEBSEARCH
+
+
+def test_route_after_evaluation_accepts_finished_answer() -> None:
+    state = {
+        "next_action": "end",
+        "evaluation": {"grounded": True, "addresses_question": True},
+    }
+    assert route_after_evaluation(state) == "__end__"
+
+
+def test_route_after_evaluation_supports_regeneration() -> None:
+    state = {"next_action": GENERATE, "evaluation": {}}
+    assert route_after_evaluation(state) == GENERATE
