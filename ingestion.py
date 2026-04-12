@@ -116,12 +116,14 @@ def get_seed_documents() -> List[Document]:
 
 @dataclass
 class HybridRetriever:
+    vectorstore: Chroma | None = None
+    documents: List[Document] | None = None
     dense_k: int = DEFAULT_TOP_K
     sparse_k: int = DEFAULT_TOP_K
 
     def __post_init__(self) -> None:
-        self.vectorstore = get_vectorstore()
-        self.documents = get_seed_documents()
+        self.vectorstore = self.vectorstore or get_vectorstore()
+        self.documents = self.documents or get_seed_documents()
         self.sparse_retriever = BM25Retriever.from_documents(self.documents)
         self.sparse_retriever.k = self.sparse_k
 

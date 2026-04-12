@@ -1,5 +1,6 @@
 from graph.corpus_profiles import get_active_corpus_profile
 from graph.retrieval_metrics import mrr_at_k, ndcg_at_k, recall_at_k, summarize_metrics
+from graph.search.providers import MEDICAL_DOMAIN_WHITELIST, PUBMED_DOMAIN_WHITELIST
 
 
 def test_medical_profile_is_default() -> None:
@@ -27,3 +28,11 @@ def test_summarize_metrics() -> None:
         ]
     )
     assert summary["recall@k"] == 0.75
+
+
+def test_medical_domain_whitelist_contains_pubmed() -> None:
+    assert "pubmed.ncbi.nlm.nih.gov" in MEDICAL_DOMAIN_WHITELIST
+
+
+def test_pubmed_domain_whitelist_contains_ncbi() -> None:
+    assert "ncbi.nlm.nih.gov" in PUBMED_DOMAIN_WHITELIST

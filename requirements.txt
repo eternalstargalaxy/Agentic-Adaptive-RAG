@@ -15,3 +15,12 @@ langchain_aws
 langchain_google_genai
 rank-bm25
 ragas
+transformers
+torch
+peft
+datasets
+accelerate
+sentencepiece
+rouge-score
+bert-score
+beir

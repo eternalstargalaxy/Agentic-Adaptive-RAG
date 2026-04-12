@@ -36,20 +36,24 @@ def _safe_ragas_faithfulness(question: str, generation: str, documents: List[Any
 
 
 def evaluate_generation(question: str, generation: str, documents: List[Any]) -> Dict[str, Any]:
-    grounding_grade = hallucination_grader.invoke(
-        {"documents": _stringify_documents(documents), "generation": generation}
-    )
     answer_grade = answer_grader.invoke(
         {"question": question, "generation": generation}
     )
     faithfulness = _safe_ragas_faithfulness(question, generation, documents)
 
-    grounded = bool(grounding_grade.binary_score)
+    grounding_source = "ragas"
     if faithfulness is not None:
-        grounded = grounded and faithfulness >= 0.5
+        grounded = faithfulness >= 0.5
+    else:
+        grounding_grade = hallucination_grader.invoke(
+            {"documents": _stringify_documents(documents), "generation": generation}
+        )
+        grounded = bool(grounding_grade.binary_score)
+        grounding_source = "llm_fallback"
 
     return {
         "grounded": grounded,
         "addresses_question": bool(answer_grade.binary_score),
         "faithfulness_score": faithfulness,
+        "grounding_source": grounding_source,
     }

@@ -1,15 +1,21 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List
-from urllib.parse import urlencode
-from urllib.request import urlopen
 
-from langchain_tavily import TavilySearch
-
-
-PUBMED_BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+MEDICAL_DOMAIN_WHITELIST = (
+    "medlineplus.gov",
+    "nih.gov",
+    "ncbi.nlm.nih.gov",
+    "pubmed.ncbi.nlm.nih.gov",
+    "cdc.gov",
+    "who.int",
+    "mayoclinic.org",
+)
+PUBMED_DOMAIN_WHITELIST = (
+    "pubmed.ncbi.nlm.nih.gov",
+    "ncbi.nlm.nih.gov",
+)
 
 
 @dataclass
@@ -26,6 +32,8 @@ class SearchHit:
 
 class TavilySearchProvider:
     def search(self, query: str, max_results: int = 3) -> List[SearchHit]:
+        from langchain_tavily import TavilySearch
+
         tool = TavilySearch(max_results=max_results)
         results = tool.invoke({"query": query}).get("results", [])
         hits = []
@@ -51,86 +59,59 @@ class MedicalWebSearchProvider:
         self.tavily_provider = tavily_provider or TavilySearchProvider()
 
     def search(self, query: str, max_results: int = 3) -> List[SearchHit]:
-        medical_query = (
-            f"(site:nih.gov OR site:medlineplus.gov OR site:cdc.gov OR "
-            f"site:who.int) {query}"
+        from langchain_tavily import TavilySearch
+
+        tool = TavilySearch(max_results=max_results)
+        results = tool.invoke(
+            {
+                "query": query,
+                "include_domains": list(MEDICAL_DOMAIN_WHITELIST),
+            }
+        ).get("results", [])
+        hits = []
+        for result in results:
+            hits.append(
+                SearchHit(
+                    title=result.get("title", ""),
+                    content=result.get("content", ""),
+                    source="medical_web",
+                    url=result.get("url", ""),
+                    metadata={"score": result.get("score")},
+                )
+            )
+        if hits:
+            return hits
+
+        medical_query = " ".join(f"site:{domain}" for domain in MEDICAL_DOMAIN_WHITELIST)
+        hits = self.tavily_provider.search(
+            f"{medical_query} {query}",
+            max_results=max_results,
         )
-        hits = self.tavily_provider.search(medical_query, max_results=max_results)
         for hit in hits:
             hit.source = "medical_web"
         return hits
 
 
 class PubMedSearchProvider:
-    def __init__(self, email: str | None = None) -> None:
-        self.email = email or "adaptive-rag@example.com"
-
-    def _fetch_json(self, endpoint: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        query = urlencode(params)
-        with urlopen(f"{PUBMED_BASE_URL}/{endpoint}?{query}") as response:
-            return json.loads(response.read().decode("utf-8"))
-
-    def _fetch_text(self, endpoint: str, params: Dict[str, Any]) -> str:
-        query = urlencode(params)
-        with urlopen(f"{PUBMED_BASE_URL}/{endpoint}?{query}") as response:
-            return response.read().decode("utf-8")
-
-    def _fetch_abstract(self, pmid: str) -> str:
-        return self._fetch_text(
-            "efetch.fcgi",
-            {
-                "db": "pubmed",
-                "id": pmid,
-                "rettype": "abstract",
-                "retmode": "text",
-            },
-        ).strip()
-
     def search(self, query: str, max_results: int = 3) -> List[SearchHit]:
-        search_payload = self._fetch_json(
-            "esearch.fcgi",
-            {
-                "db": "pubmed",
-                "term": query,
-                "retmode": "json",
-                "retmax": max_results,
-                "sort": "relevance",
-                "tool": "adaptive-rag",
-                "email": self.email,
-            },
-        )
-        pmids = search_payload.get("esearchresult", {}).get("idlist", [])
-        if not pmids:
-            return []
+        from langchain_tavily import TavilySearch
 
-        summary_payload = self._fetch_json(
-            "esummary.fcgi",
+        tool = TavilySearch(max_results=max_results)
+        results = tool.invoke(
             {
-                "db": "pubmed",
-                "id": ",".join(pmids),
-                "retmode": "json",
-                "tool": "adaptive-rag",
-                "email": self.email,
-            },
-        )
-        summaries = summary_payload.get("result", {})
-
+                "query": query,
+                "include_domains": list(PUBMED_DOMAIN_WHITELIST),
+            }
+        ).get("results", [])
         hits = []
-        for pmid in pmids:
-            summary = summaries.get(pmid, {})
-            title = summary.get("title", f"PubMed article {pmid}")
-            abstract = self._fetch_abstract(pmid)
+        for result in results:
             hits.append(
                 SearchHit(
-                    title=title,
-                    content=abstract or title,
+                    title=result.get("title", ""),
+                    content=result.get("content", ""),
                     source="pubmed",
-                    url=f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/",
-                    metadata={
-                        "pmid": pmid,
-                        "pubdate": summary.get("pubdate", ""),
-                        "authors": summary.get("authors", []),
-                    },
+                    url=result.get("url", ""),
+                    metadata={"score": result.get("score")},
                 )
             )
         return hits
