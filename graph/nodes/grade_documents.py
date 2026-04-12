@@ -1,44 +1,72 @@
 from typing import Any, Dict
+
+from graph.chains.gap_analyzer import gap_analyzer
 from graph.chains.retrieval_grader import retrieval_grader
+from graph.consts import GENERATE, MAX_RETRIEVAL_ROUNDS, MIN_RELEVANT_DOCS, RETRIEVE, WEBSEARCH
 from graph.state import GraphState
+
 
 def grade_documents(state: GraphState) -> Dict[str, Any]:
     """
-    Determines whether the retrieved documents are relevant to the question
-    If any document is not relevant, we will set a flag to run web search.
-    
-    Args:
-        state (dict): The current graph state
-        
-    Returns:
-        state (dict): Filtered out irrelevant documents and updated web_search state 
+    Filter retrieved documents and decide whether to generate, retrieve again,
+    or fallback to web search.
     """
-    
+
     print("---CHECK DOCUMENT RELEVANCE TO QUESTION---")
     question = state["question"]
-    documents = state["documents"]
-    
+    documents = state.get("documents", [])
+
     filtered_docs = []
-    web_search = False
-    for d in documents:
+    for document in documents:
         score = retrieval_grader.invoke(
-            {"question":question,"document":d.page_content}
+            {"question": question, "document": document.page_content}
         )
-        grade = score.binary_score
-        if grade.lower() == "yes":
+        if score.binary_score.lower() == "yes":
             print("---GRADE: DOCUMENT RELEVANT---")
-            filtered_docs.append(d)
+            filtered_docs.append(document)
         else:
             print("---GRADE: DOCUMENT NOT RELEVANT---")
-            web_search = True
-            continue
-    return {"documents": filtered_docs, "question": question, "web_search": web_search}
 
+    relevant_doc_count = len(filtered_docs)
+    next_action = GENERATE if relevant_doc_count >= MIN_RELEVANT_DOCS else WEBSEARCH
+    sub_queries = []
+    search_query = state.get("rewritten_question", question)
 
-"""
-The document grading node implements our quality control mechanism by evaluating each retrieved document for relevance to the user's question. 
-It iterates through all retrieved documents and uses our retrieval grader to assess their relevance. 
-Documents that are deemed relevant are added to the filtered list, while irrelevant documents are discarded.
-Importantly, if any document is found to be irrelevant, the node sets the web_search flag to True, signalling that we need additional information from external sources. 
-This adaptive behavior ensures that users get comprehensive answers even when local knowledge is insufficient.
-"""
+    if filtered_docs:
+        evidence_summary = "\n\n".join(
+            document.page_content[:500] for document in filtered_docs[:4]
+        )
+    else:
+        evidence_summary = "No relevant local evidence found."
+
+    if relevant_doc_count < MIN_RELEVANT_DOCS:
+        analysis = gap_analyzer.invoke(
+            {
+                "question": question,
+                "route": state.get("route", "vectorstore"),
+                "retrieval_round": state.get("retrieval_round", 0),
+                "relevant_doc_count": relevant_doc_count,
+                "documents": evidence_summary,
+            }
+        )
+        sub_queries = analysis.sub_queries
+        search_query = analysis.search_query or search_query
+        if (
+            analysis.next_action == "retrieve"
+            and state.get("retrieval_round", 0) < MAX_RETRIEVAL_ROUNDS
+            and sub_queries
+        ):
+            next_action = RETRIEVE
+        elif analysis.next_action == "generate" and filtered_docs:
+            next_action = GENERATE
+        else:
+            next_action = WEBSEARCH
+
+    return {
+        "documents": filtered_docs,
+        "question": question,
+        "web_search": next_action == WEBSEARCH,
+        "next_action": next_action,
+        "sub_queries": sub_queries,
+        "search_query": search_query,
+    }

@@ -1,24 +1,29 @@
-from typing import List, TypedDict
+from typing import Any, Dict, List, TypedDict
 
-class GraphState(TypedDict):
+
+class GraphState(TypedDict, total=False):
     """
-    Represent the state of our graph
-    
-    Attributes:
-        question:question
-        generation: LLM generation
-        web_search:whether to add search
-        documents:list of documents
+    Shared state carried across the LangGraph workflow.
     """
-    
-    question:str
-    generation:str
-    web_search:bool
-    documents:List[str]
-    
-    
+
+    question: str
+    rewritten_question: str
+    route: str
+    retrieval_queries: List[str]
+    sub_queries: List[str]
+    search_query: str
+    use_hyde: bool
+    generation: str
+    documents: List[Any]
+    web_search: bool
+    retrieval_round: int
+    retry_count: int
+    next_action: str
+    evaluation: Dict[str, Any]
+
+
 """
-This GraphState class acts as the central data structure that flows through every node in our graph workflow. 
-The question field holds the user's input query, generation stores the LLM's response, web_search is a boolean flag that determines whether we need to search the web for additional information, and documents contains all the retrieved documents from both local and web sources.
-By using TypedDict, we ensure type safety while maintaining the flexibility needed for our dynamic workflow.
+The refactored state tracks both user-facing outputs and process metadata,
+including rewrite results, multi-round retrieval queries, retry counters, and
+evaluation details used for control flow.
 """
