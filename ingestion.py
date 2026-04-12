@@ -1,45 +1,169 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+from typing import Iterable, List, Sequence
+
 from dotenv import load_dotenv
+from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import WebBaseLoader
+from langchain_community.retrievers import BM25Retriever
+
 from model import embed_model
 
 load_dotenv()
 
-urls = [
+DEFAULT_URLS = [
     "https://lilianweng.github.io/posts/2023-06-23-agent/",
     "https://lilianweng.github.io/posts/2023-03-15-prompt-engineering/",
     "https://lilianweng.github.io/posts/2023-10-25-adv-attack-llm/",
 ]
-
-docs = [WebBaseLoader(url).load() for url in urls]
-docs_list = [item for sublist in docs for item in sublist]
-
-text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
-    chunk_size=250, chunk_overlap=0
-)
-
-doc_splits = text_splitter.split_documents(docs_list)
-
-embed = embed_model
-
-# Create vector store with documents
-vectorstore = Chroma.from_documents(
-    documents=doc_splits,
-    collection_name="rag-chroma",
-    embedding=embed,
-    persist_directory="./.chroma")
+PERSIST_DIRECTORY = Path("./.chroma")
+COLLECTION_NAME = "rag-chroma"
+DEFAULT_TOP_K = 6
 
 
-# Create retriever
-retriever = vectorstore.as_retriever()
+def _dedupe_documents(documents: Iterable[Document]) -> List[Document]:
+    unique_documents = []
+    seen = set()
+    for document in documents:
+        content = (document.page_content or "").strip()
+        source = document.metadata.get("source", "")
+        key = f"{source}::{content[:400]}"
+        if key in seen or not content:
+            continue
+        seen.add(key)
+        unique_documents.append(document)
+    return unique_documents
 
 
-"""
-This ingestion pipeline forms the backbone of our local knowledge base. 
-We start by loading environment variables, then define a curated list of URLs containing high-quality content about AI agents, prompt engineering, and adversarial attacks.
-The WebBaseLoader fetches content from these URLs and loads them into document objects. 
-We then use the RecursiveCharacterTextSplitter to break down these documents into smaller, manageable chunks of 250 tokens each, which is optimal for embedding and retrieval. 
-The splitter uses tiktoken encoding to ensure accurate token counting.
-Finally, we create a Chroma vector store that will persist our embeddings locally, using Google's text-embedding-004 model for high-quality semantic representations.
-"""
+def _reciprocal_rank_fusion(result_sets: Sequence[Sequence[Document]], k: int = 60) -> List[Document]:
+    scores = {}
+    document_lookup = {}
+
+    for result_set in result_sets:
+        for rank, document in enumerate(result_set, start=1):
+            content = (document.page_content or "").strip()
+            source = document.metadata.get("source", "")
+            key = f"{source}::{content[:400]}"
+            document_lookup[key] = document
+            scores[key] = scores.get(key, 0.0) + 1.0 / (k + rank)
+
+    ordered_keys = sorted(scores, key=scores.get, reverse=True)
+    return [document_lookup[key] for key in ordered_keys]
+
+
+def _load_seed_documents(urls: Sequence[str] = DEFAULT_URLS) -> List[Document]:
+    docs = [WebBaseLoader(url).load() for url in urls]
+    docs_list = [item for sublist in docs for item in sublist]
+
+    text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
+        chunk_size=300,
+        chunk_overlap=50,
+    )
+    return text_splitter.split_documents(docs_list)
+
+
+def _load_documents_from_vectorstore(vectorstore: Chroma) -> List[Document]:
+    raw = vectorstore.get()
+    documents = raw.get("documents", [])
+    metadatas = raw.get("metadatas", [])
+
+    return [
+        Document(page_content=page_content, metadata=metadata or {})
+        for page_content, metadata in zip(documents, metadatas)
+    ]
+
+
+@lru_cache(maxsize=1)
+def get_vectorstore() -> Chroma:
+    if PERSIST_DIRECTORY.exists():
+        vectorstore = Chroma(
+            collection_name=COLLECTION_NAME,
+            embedding_function=embed_model,
+            persist_directory=str(PERSIST_DIRECTORY),
+        )
+        existing = vectorstore.get()
+        if existing.get("ids"):
+            return vectorstore
+
+    seed_documents = _load_seed_documents()
+    return Chroma.from_documents(
+        documents=seed_documents,
+        collection_name=COLLECTION_NAME,
+        embedding=embed_model,
+        persist_directory=str(PERSIST_DIRECTORY),
+    )
+
+
+@lru_cache(maxsize=1)
+def get_seed_documents() -> List[Document]:
+    vectorstore = get_vectorstore()
+    documents = _load_documents_from_vectorstore(vectorstore)
+    if documents:
+        return documents
+    return _load_seed_documents()
+
+
+@dataclass
+class HybridRetriever:
+    dense_k: int = DEFAULT_TOP_K
+    sparse_k: int = DEFAULT_TOP_K
+
+    def __post_init__(self) -> None:
+        self.vectorstore = get_vectorstore()
+        self.documents = get_seed_documents()
+        self.sparse_retriever = BM25Retriever.from_documents(self.documents)
+        self.sparse_retriever.k = self.sparse_k
+
+    def invoke(self, queries: str | Sequence[str]) -> List[Document]:
+        normalized_queries = normalize_queries(queries)
+        result_sets: List[List[Document]] = []
+
+        for query in normalized_queries:
+            dense_docs = self.vectorstore.similarity_search(query, k=self.dense_k)
+            sparse_docs = self.sparse_retriever.invoke(query)
+            result_sets.append(dense_docs)
+            result_sets.append(sparse_docs)
+
+        fused_documents = _reciprocal_rank_fusion(result_sets)
+        return _dedupe_documents(fused_documents)[: self.dense_k + self.sparse_k]
+
+
+def normalize_queries(queries: str | Sequence[str] | None) -> List[str]:
+    if queries is None:
+        return []
+    if isinstance(queries, str):
+        queries = [queries]
+
+    cleaned = []
+    for query in queries:
+        query = (query or "").strip()
+        if query and query not in cleaned:
+            cleaned.append(query)
+    return cleaned
+
+
+@lru_cache(maxsize=1)
+def get_hybrid_retriever() -> HybridRetriever:
+    return HybridRetriever()
+
+
+def ingest_documents(urls: Sequence[str] = DEFAULT_URLS) -> Chroma:
+    documents = _load_seed_documents(urls)
+    return Chroma.from_documents(
+        documents=documents,
+        collection_name=COLLECTION_NAME,
+        embedding=embed_model,
+        persist_directory=str(PERSIST_DIRECTORY),
+    )
+
+
+retriever = get_hybrid_retriever()
+
+
+if __name__ == "__main__":
+    ingest_documents()
