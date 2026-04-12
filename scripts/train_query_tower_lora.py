@@ -20,6 +20,7 @@ class TrainingConfig:
     learning_rate: float
     epochs: int
     max_length: int
+    temperature: float
     lora_r: int
     lora_alpha: int
     lora_dropout: float
@@ -32,6 +33,13 @@ class QueryTowerLoRATrainer:
     The document tower stays frozen. The query tower learns to better align
     short, ambiguous, and terminology-shifted medical questions with the
     document embedding space.
+
+    Training objective:
+    - input: (query, correct document, confusable negative document)
+    - output: three embeddings
+    - loss: InfoNCE contrastive learning
+    - goal: make the query closer to the correct medical evidence than to
+      easily confused negative evidence
     """
 
     def __init__(self, config: TrainingConfig) -> None:
@@ -93,59 +101,58 @@ class QueryTowerLoRATrainer:
             embeddings = self.torch.nn.functional.normalize(embeddings, p=2, dim=1)
         return embeddings
 
-    def _build_batch(self, batch: List[Dict[str, Any]]):
+    def _extract_triplets(self, batch: List[Dict[str, Any]]):
         queries = [row["query"] for row in batch]
-        positives = [row["positive_passage"] for row in batch]
-        negatives = [row.get("hard_negative_passages", []) for row in batch]
+        positives = [
+            row.get("positive_document") or row.get("positive_passage")
+            for row in batch
+        ]
+        negatives = [
+            (
+                row.get("confusable_negative_document")
+                or row.get("hard_negative_passages", [None])[0]
+            )
+            for row in batch
+        ]
         return queries, positives, negatives
+
+    def _compute_info_nce_loss(self, query_embeddings, positive_embeddings, negative_embeddings):
+        positive_scores = (query_embeddings * positive_embeddings).sum(dim=1, keepdim=True)
+        negative_scores = (query_embeddings * negative_embeddings).sum(dim=1, keepdim=True)
+        logits = self.torch.cat([positive_scores, negative_scores], dim=1)
+        logits = logits / self.config.temperature
+        labels = self.torch.zeros(query_embeddings.size(0), dtype=self.torch.long, device=self.device)
+        return self.torch.nn.functional.cross_entropy(logits, labels), logits
 
     def train(self, rows: List[Dict[str, Any]]) -> None:
         self.query_model.train()
         batch_size = self.config.batch_size
-        loss_fn = self.torch.nn.CrossEntropyLoss()
 
         for epoch in range(self.config.epochs):
             for start in range(0, len(rows), batch_size):
                 batch = rows[start : start + batch_size]
-                queries, positives, negatives = self._build_batch(batch)
+                queries, positives, negatives = self._extract_triplets(batch)
                 query_embeddings = self._encode(self.query_model, queries)
 
-                flat_candidates = []
-                labels = []
-                for row_index, positive in enumerate(positives):
-                    candidate_group = [positive] + negatives[row_index]
-                    labels.append(0)
-                    flat_candidates.extend(candidate_group)
-
                 with self.torch.no_grad():
-                    candidate_embeddings = self._encode(self.doc_model, flat_candidates)
+                    positive_embeddings = self._encode(self.doc_model, positives)
+                    negative_embeddings = self._encode(self.doc_model, negatives)
 
-                max_candidates = max(1 + len(item) for item in negatives)
-                hidden_size = candidate_embeddings.size(-1)
-                candidate_tensor = self.torch.zeros(
-                    len(batch),
-                    max_candidates,
-                    hidden_size,
-                    device=self.device,
+                loss, logits = self._compute_info_nce_loss(
+                    query_embeddings,
+                    positive_embeddings,
+                    negative_embeddings,
                 )
-
-                pointer = 0
-                for batch_index, row in enumerate(batch):
-                    group_size = 1 + len(row.get("hard_negative_passages", []))
-                    candidate_tensor[batch_index, :group_size, :] = candidate_embeddings[
-                        pointer : pointer + group_size
-                    ]
-                    pointer += group_size
-
-                scores = self.torch.einsum("bd,bcd->bc", query_embeddings, candidate_tensor)
-                target = self.torch.tensor(labels, device=self.device)
-                loss = loss_fn(scores, target)
 
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
 
-            print(f"epoch={epoch + 1} loss={loss.item():.4f}")
+            margin = (logits[:, 0] - logits[:, 1]).mean().item()
+            print(
+                f"epoch={epoch + 1} loss={loss.item():.4f} "
+                f"avg_pos_neg_margin={margin:.4f}"
+            )
 
         self.config.output_dir.mkdir(parents=True, exist_ok=True)
         self.query_model.save_pretrained(self.config.output_dir)
@@ -161,6 +168,7 @@ def main() -> None:
     parser.add_argument("--learning-rate", type=float, default=2e-4)
     parser.add_argument("--epochs", type=int, default=2)
     parser.add_argument("--max-length", type=int, default=384)
+    parser.add_argument("--temperature", type=float, default=0.05)
     parser.add_argument("--lora-r", type=int, default=8)
     parser.add_argument("--lora-alpha", type=int, default=16)
     parser.add_argument("--lora-dropout", type=float, default=0.1)
@@ -175,6 +183,7 @@ def main() -> None:
             learning_rate=args.learning_rate,
             epochs=args.epochs,
             max_length=args.max_length,
+            temperature=args.temperature,
             lora_r=args.lora_r,
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
