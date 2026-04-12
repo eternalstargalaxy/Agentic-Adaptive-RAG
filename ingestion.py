@@ -12,17 +12,11 @@ from langchain_chroma import Chroma
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.retrievers import BM25Retriever
 
+from graph.corpus_profiles import CorpusProfile, get_active_corpus_profile
 from model import embed_model
 
 load_dotenv()
 
-DEFAULT_URLS = [
-    "https://lilianweng.github.io/posts/2023-06-23-agent/",
-    "https://lilianweng.github.io/posts/2023-03-15-prompt-engineering/",
-    "https://lilianweng.github.io/posts/2023-10-25-adv-attack-llm/",
-]
-PERSIST_DIRECTORY = Path("./.chroma")
-COLLECTION_NAME = "rag-chroma"
 DEFAULT_TOP_K = 6
 
 
@@ -56,7 +50,15 @@ def _reciprocal_rank_fusion(result_sets: Sequence[Sequence[Document]], k: int = 
     return [document_lookup[key] for key in ordered_keys]
 
 
-def _load_seed_documents(urls: Sequence[str] = DEFAULT_URLS) -> List[Document]:
+def _collection_name(profile: CorpusProfile) -> str:
+    return f"rag-chroma-{profile.name}"
+
+
+def _persist_directory(profile: CorpusProfile) -> Path:
+    return Path("./.chroma") / profile.name
+
+
+def _load_seed_documents(urls: Sequence[str]) -> List[Document]:
     docs = [WebBaseLoader(url).load() for url in urls]
     docs_list = [item for sublist in docs for item in sublist]
 
@@ -80,22 +82,26 @@ def _load_documents_from_vectorstore(vectorstore: Chroma) -> List[Document]:
 
 @lru_cache(maxsize=1)
 def get_vectorstore() -> Chroma:
-    if PERSIST_DIRECTORY.exists():
+    profile = get_active_corpus_profile()
+    persist_directory = _persist_directory(profile)
+    collection_name = _collection_name(profile)
+
+    if persist_directory.exists():
         vectorstore = Chroma(
-            collection_name=COLLECTION_NAME,
+            collection_name=collection_name,
             embedding_function=embed_model,
-            persist_directory=str(PERSIST_DIRECTORY),
+            persist_directory=str(persist_directory),
         )
         existing = vectorstore.get()
         if existing.get("ids"):
             return vectorstore
 
-    seed_documents = _load_seed_documents()
+    seed_documents = _load_seed_documents(profile.urls)
     return Chroma.from_documents(
         documents=seed_documents,
-        collection_name=COLLECTION_NAME,
+        collection_name=collection_name,
         embedding=embed_model,
-        persist_directory=str(PERSIST_DIRECTORY),
+        persist_directory=str(persist_directory),
     )
 
 
@@ -105,7 +111,7 @@ def get_seed_documents() -> List[Document]:
     documents = _load_documents_from_vectorstore(vectorstore)
     if documents:
         return documents
-    return _load_seed_documents()
+    return _load_seed_documents(get_active_corpus_profile().urls)
 
 
 @dataclass
@@ -152,17 +158,24 @@ def get_hybrid_retriever() -> HybridRetriever:
     return HybridRetriever()
 
 
-def ingest_documents(urls: Sequence[str] = DEFAULT_URLS) -> Chroma:
+def ingest_documents(urls: Sequence[str] | None = None) -> Chroma:
+    profile = get_active_corpus_profile()
+    urls = urls or profile.urls
     documents = _load_seed_documents(urls)
     return Chroma.from_documents(
         documents=documents,
-        collection_name=COLLECTION_NAME,
+        collection_name=_collection_name(profile),
         embedding=embed_model,
-        persist_directory=str(PERSIST_DIRECTORY),
+        persist_directory=str(_persist_directory(profile)),
     )
 
 
-retriever = get_hybrid_retriever()
+class RetrieverProxy:
+    def invoke(self, queries: str | Sequence[str]) -> List[Document]:
+        return get_hybrid_retriever().invoke(queries)
+
+
+retriever = RetrieverProxy()
 
 
 if __name__ == "__main__":

@@ -272,6 +272,9 @@ mcp-debug.log
 output/
 generated/
 visualizations/
+.chroma/
+reports/
+artifacts/
 
 # Dependencies (uncomment if you want to ignore these)
 # node_modules/ (if you have any Node.js dependencies)

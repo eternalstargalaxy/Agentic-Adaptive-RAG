@@ -3,6 +3,7 @@ from typing import Literal
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 
+from graph.corpus_profiles import get_active_corpus_profile
 from model import grader_model
 
 
@@ -18,15 +19,17 @@ class RouteQuery(BaseModel):
 
 
 structured_llm_router = grader_model.with_structured_output(RouteQuery)
+profile = get_active_corpus_profile()
+topics = "\n".join(f"- {topic}" for topic in profile.routing_topics)
 
-system = """
+system = f"""
 You route user questions to either a local vectorstore or web search.
 
+Current corpus profile: {profile.display_name}
+Corpus description: {profile.description}
+
 The vectorstore is specialized in:
-- AI agents and agent memory
-- prompt engineering
-- adversarial attacks on LLMs
-- agentic RAG system design patterns
+{topics}
 
 Route to the vectorstore when the question can likely be answered from this
 specialized knowledge base. Route to websearch when the user asks for current

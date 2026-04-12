@@ -1,5 +1,6 @@
 from typing import Any, Dict
 
+from graph.corpus_profiles import get_active_corpus_profile
 from graph.chains.query_rewriter import query_rewriter
 from graph.chains.router import RouteQuery, question_router
 from graph.state import GraphState
@@ -9,6 +10,7 @@ def rewrite_query(state: GraphState) -> Dict[str, Any]:
     print("---REWRITE QUESTION---")
 
     question = state["question"]
+    profile = get_active_corpus_profile()
     route: RouteQuery = question_router.invoke({"question": question})
     rewrite_plan = query_rewriter.invoke({"question": question})
 
@@ -18,6 +20,8 @@ def rewrite_query(state: GraphState) -> Dict[str, Any]:
         "retrieval_queries": rewrite_plan.retrieval_queries or [question],
         "search_query": rewrite_plan.rewritten_question,
         "route": route.datasource,
+        "corpus_profile": profile.name,
+        "preferred_search_tools": list(profile.preferred_search_tools),
         "retrieval_round": 0,
         "retry_count": state.get("retry_count", 0),
         "documents": state.get("documents", []),
