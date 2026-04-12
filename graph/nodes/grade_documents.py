@@ -2,7 +2,16 @@ from typing import Any, Dict
 
 from graph.chains.gap_analyzer import gap_analyzer
 from graph.chains.retrieval_grader import retrieval_grader
-from graph.consts import GENERATE, MAX_RETRIEVAL_ROUNDS, MIN_RELEVANT_DOCS, RETRIEVE, WEBSEARCH
+from graph.consts import (
+    GENERATE,
+    MAX_RETRIEVAL_ROUNDS,
+    MIN_RELEVANT_DOCS,
+    MULTI_HOP,
+    RETRIEVE,
+    SINGLE_STEP,
+    SINGLE_STEP_MIN_RELEVANT_DOCS,
+    WEBSEARCH,
+)
 from graph.state import GraphState
 
 
@@ -15,6 +24,7 @@ def grade_documents(state: GraphState) -> Dict[str, Any]:
     print("---CHECK DOCUMENT RELEVANCE TO QUESTION---")
     question = state["question"]
     documents = state.get("documents", [])
+    route_strategy = state.get("route_strategy", MULTI_HOP)
 
     filtered_docs = []
     for document in documents:
@@ -28,7 +38,10 @@ def grade_documents(state: GraphState) -> Dict[str, Any]:
             print("---GRADE: DOCUMENT NOT RELEVANT---")
 
     relevant_doc_count = len(filtered_docs)
-    next_action = GENERATE if relevant_doc_count >= MIN_RELEVANT_DOCS else WEBSEARCH
+    if route_strategy == SINGLE_STEP:
+        next_action = GENERATE if relevant_doc_count >= SINGLE_STEP_MIN_RELEVANT_DOCS else WEBSEARCH
+    else:
+        next_action = GENERATE if relevant_doc_count >= MIN_RELEVANT_DOCS else WEBSEARCH
     sub_queries = []
     search_query = state.get("rewritten_question", question)
 
@@ -38,6 +51,16 @@ def grade_documents(state: GraphState) -> Dict[str, Any]:
         )
     else:
         evidence_summary = "No relevant local evidence found."
+
+    if route_strategy == SINGLE_STEP:
+        return {
+            "documents": filtered_docs,
+            "question": question,
+            "web_search": next_action == WEBSEARCH,
+            "next_action": next_action,
+            "sub_queries": [],
+            "search_query": search_query,
+        }
 
     if relevant_doc_count < MIN_RELEVANT_DOCS:
         analysis = gap_analyzer.invoke(

@@ -35,10 +35,23 @@ def _safe_ragas_faithfulness(question: str, generation: str, documents: List[Any
         return None
 
 
-def evaluate_generation(question: str, generation: str, documents: List[Any]) -> Dict[str, Any]:
+def evaluate_generation(
+    question: str,
+    generation: str,
+    documents: List[Any],
+    route_strategy: str | None = None,
+) -> Dict[str, Any]:
     answer_grade = answer_grader.invoke(
         {"question": question, "generation": generation}
     )
+    if route_strategy == "no_retrieval":
+        return {
+            "grounded": True,
+            "addresses_question": bool(answer_grade.binary_score),
+            "faithfulness_score": None,
+            "grounding_source": "parametric_llm",
+        }
+
     faithfulness = _safe_ragas_faithfulness(question, generation, documents)
 
     grounding_source = "ragas"

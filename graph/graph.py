@@ -5,9 +5,10 @@ from graph.consts import (
     EVALUATE_GENERATION,
     GENERATE,
     GRADE_DOCUMENTS,
+    MULTI_HOP,
+    NO_RETRIEVAL,
     RETRIEVE,
     REWRITE_QUERY,
-    VECTORSTORE,
     WEBSEARCH,
 )
 from graph.nodes.evaluate_generation import evaluate_generation_node
@@ -23,11 +24,15 @@ load_dotenv()
 
 def route_after_rewrite(state: GraphState) -> str:
     print("---ROUTE QUESTION---")
-    if state["route"] == VECTORSTORE:
-        print("---ROUTE QUESTION TO HYBRID RAG---")
+    route_strategy = state.get("route_strategy", MULTI_HOP)
+    if route_strategy == NO_RETRIEVAL:
+        print("---ROUTE QUESTION TO DIRECT GENERATION---")
+        return GENERATE
+    if route_strategy == MULTI_HOP:
+        print("---ROUTE QUESTION TO MULTI-HOP HYBRID RAG---")
         return RETRIEVE
-    print("---ROUTE QUESTION TO WEB SEARCH---")
-    return WEBSEARCH
+    print("---ROUTE QUESTION TO SINGLE-STEP HYBRID RETRIEVAL---")
+    return RETRIEVE
 
 
 def route_after_document_grading(state: GraphState) -> str:
@@ -82,8 +87,8 @@ workflow.add_conditional_edges(
     REWRITE_QUERY,
     route_after_rewrite,
     {
+        GENERATE: GENERATE,
         RETRIEVE: RETRIEVE,
-        WEBSEARCH: WEBSEARCH,
     },
 )
 

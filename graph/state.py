@@ -9,6 +9,9 @@ class GraphState(TypedDict, total=False):
     question: str
     rewritten_question: str
     route: str
+    route_strategy: str
+    forced_route_strategy: str
+    route_rationale: str
     corpus_profile: str
     retrieval_queries: List[str]
     sub_queries: List[str]
