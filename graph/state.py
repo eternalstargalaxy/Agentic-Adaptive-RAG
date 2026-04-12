@@ -12,6 +12,7 @@ class GraphState(TypedDict, total=False):
     route_strategy: str
     forced_route_strategy: str
     route_rationale: str
+    route_history: List[str]
     corpus_profile: str
     retrieval_queries: List[str]
     sub_queries: List[str]

@@ -22,6 +22,9 @@ def rewrite_query(state: GraphState) -> Dict[str, Any]:
         route_rationale = route.rationale
     rewrite_plan = query_rewriter.invoke({"question": question})
     route_target = LLM if route_strategy == NO_RETRIEVAL else VECTORSTORE
+    route_history = list(state.get("route_history", []))
+    if not route_history or route_history[-1] != route_strategy:
+        route_history.append(route_strategy)
 
     return {
         "question": question,
@@ -39,4 +42,5 @@ def rewrite_query(state: GraphState) -> Dict[str, Any]:
         "sub_queries": [],
         "use_hyde": rewrite_plan.use_hyde if route_strategy in {SINGLE_STEP, MULTI_HOP} else False,
         "route_rationale": route_rationale,
+        "route_history": route_history,
     }

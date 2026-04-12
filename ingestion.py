@@ -58,6 +58,14 @@ def _persist_directory(profile: CorpusProfile) -> Path:
     return Path("./.chroma") / profile.name
 
 
+def get_collection_name(profile: CorpusProfile | None = None) -> str:
+    return _collection_name(profile or get_active_corpus_profile())
+
+
+def get_persist_directory(profile: CorpusProfile | None = None) -> Path:
+    return _persist_directory(profile or get_active_corpus_profile())
+
+
 def _load_seed_documents(urls: Sequence[str]) -> List[Document]:
     docs = [WebBaseLoader(url).load() for url in urls]
     docs_list = [item for sublist in docs for item in sublist]
@@ -80,11 +88,15 @@ def _load_documents_from_vectorstore(vectorstore: Chroma) -> List[Document]:
     ]
 
 
+def load_documents_from_vectorstore(vectorstore: Chroma) -> List[Document]:
+    return _load_documents_from_vectorstore(vectorstore)
+
+
 @lru_cache(maxsize=1)
 def get_vectorstore() -> Chroma:
     profile = get_active_corpus_profile()
-    persist_directory = _persist_directory(profile)
-    collection_name = _collection_name(profile)
+    persist_directory = get_persist_directory(profile)
+    collection_name = get_collection_name(profile)
 
     if persist_directory.exists():
         vectorstore = Chroma(
@@ -158,6 +170,36 @@ def normalize_queries(queries: str | Sequence[str] | None) -> List[str]:
 @lru_cache(maxsize=1)
 def get_hybrid_retriever() -> HybridRetriever:
     return HybridRetriever()
+
+
+def open_vectorstore(
+    embedding_function=None,
+    profile: CorpusProfile | None = None,
+) -> Chroma:
+    profile = profile or get_active_corpus_profile()
+    return Chroma(
+        collection_name=get_collection_name(profile),
+        embedding_function=embedding_function or embed_model,
+        persist_directory=str(get_persist_directory(profile)),
+    )
+
+
+def get_local_documents(
+    embedding_function=None,
+    profile: CorpusProfile | None = None,
+) -> List[Document]:
+    vectorstore = open_vectorstore(
+        embedding_function=embedding_function,
+        profile=profile,
+    )
+    documents = load_documents_from_vectorstore(vectorstore)
+    if documents:
+        return documents
+
+    raise RuntimeError(
+        "No local corpus documents were found in the Chroma collection. "
+        "Run ingestion.py first to build the local medical corpus index."
+    )
 
 
 def ingest_documents(urls: Sequence[str] | None = None) -> Chroma:

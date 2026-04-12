@@ -265,8 +265,12 @@
 模块位置：
 
 - 训练脚本：`scripts/train_query_tower_lora.py`
+- 训练种子模板：`data/train/query_tower_seed_template.jsonl`
 - 训练数据模板：`data/train/query_tower_lora_template.jsonl`
+- 训练数据构造：`scripts/build_query_tower_training_data.py`
 - 配置示例：`configs/query_tower_lora.example.json`
+- 训练前 baseline：`scripts/retrieval_eval.py`
+- 训练前后对比：`scripts/compare_query_tower_baseline.py`
 - LoRA 推理接入：`graph/embeddings/bge_m3.py`
 - 环境变量入口：`model.py`
 
@@ -294,6 +298,34 @@
 - 让模型在医学易混淆知识之间拉开距离。
 - 让 `query` 更接近正确文档，远离易混淆错误文档。
 
+### 3.13 Query Tower 训练闭环与升级率统计
+
+当前状态：
+
+- 已补齐“训练数据构造 -> 训练前 baseline -> 训练后对比 -> 路由升级率统计”的闭环脚手架
+
+模块位置：
+
+- 训练种子模板：`data/train/query_tower_seed_template.jsonl`
+- Triplet 构造脚本：`scripts/build_query_tower_training_data.py`
+- 检索评测模板：`data/eval/medical_retrieval_eval_template.jsonl`
+- 路由评测模板：`data/eval/route_upgrade_eval_template.jsonl`
+- 训练前 baseline：`scripts/retrieval_eval.py`
+- 训练前后对比：`scripts/compare_query_tower_baseline.py`
+- 路由升级率统计：`scripts/compute_route_upgrade_stats.py`
+- 路由历史状态：`graph/state.py`
+- 路由历史写入：`graph/nodes/rewrite_query.py`
+- 公共评测工具：`graph/retrieval_eval_utils.py`
+
+作用说明：
+
+- `scripts/build_query_tower_training_data.py` 会基于现有医学语料、当前混合检索器和种子 query，自动构造 `(query, positive document, confusable negative document)` 三元组。
+- 这里的 `confusable negative` 不是随便采样的负例，而是优先从当前检索器最容易混淆的候选里挖掘，因此它直接对应“医学域易混知识分离”这个训练目标。
+- `scripts/retrieval_eval.py` 用来在训练前拿到纯 baseline，并且现在可以按 `query_type` 切片，回答“当前最弱的是哪类 query”。
+- `scripts/compare_query_tower_baseline.py` 会在同一套 ChromaDB 语料、同一套 BM25 条件下，对比 base query tower 和 LoRA query tower 的 `Recall@k / NDCG@k / MRR@k`，并输出 `recovered_from_miss`、`improved_top1` 等收益来源指标。
+- `scripts/compute_route_upgrade_stats.py` 会统计真实图执行中的 `No Retrieval -> Single-Step`、`Single-Step -> Multi-Hop` 升级率。若 LoRA 让首轮检索更准，就应该看到部分 query 不再那么容易被迫升级到更高成本路线。
+- `route_history` 被加入到 LangGraph state 后，这个升级统计基于真实执行路径，而不是静态推断。
+
 ## 4. 简历点逐条对照
 
 下面按你的简历描述逐条核对当前项目状态。
@@ -310,6 +342,8 @@
 - `graph/nodes/rewrite_query.py`
 - `graph/graph.py`
 - `graph/nodes/evaluate_generation.py`
+- `graph/state.py`
+- `scripts/compute_route_upgrade_stats.py`
 
 说明：
 
@@ -359,7 +393,9 @@
 
 - embedding：`graph/embeddings/bge_m3.py`
 - ChromaDB + hybrid retrieval：`ingestion.py`
+- 训练数据构造：`scripts/build_query_tower_training_data.py`
 - LoRA 训练：`scripts/train_query_tower_lora.py`
+- 训练前后对比：`scripts/compare_query_tower_baseline.py`
 
 说明：
 
@@ -447,9 +483,12 @@
 
 对应模块：
 
+- `data/train/query_tower_seed_template.jsonl`
+- `scripts/build_query_tower_training_data.py`
 - `scripts/train_query_tower_lora.py`
 - `data/train/query_tower_lora_template.jsonl`
 - `configs/query_tower_lora.example.json`
+- `scripts/compare_query_tower_baseline.py`
 
 说明：
 
@@ -457,29 +496,45 @@
 - 输出：`3 个向量`
 - 目标：让模型分得清医学易混淆知识
 
-## 5. 为什么当前阶段仍然先做 LoRA，而不是直接上更复杂的 Adaptive 方案
+## 5. 为什么当前阶段仍然先做 LoRA，以及如何回答“为什么要训、baseline 是多少、提升来自哪里”
 
 当前更推荐的顺序是：
 
-1. 先用当前脚手架拿到训练前 baseline
-2. 再对 `BGE-M3 query tower` 做 `LoRA`
-3. 再比较：
-   - `Recall@5`
-   - `NDCG@10`
-   - `MRR@10`
+1. 先补充 `data/train/query_tower_seed_template.jsonl`，用 `scripts/build_query_tower_training_data.py` 自动构造医学三元组训练集
+2. 先用 `scripts/retrieval_eval.py` 在训练前拿到 baseline，并按 `query_type` 找到最弱 query 类型
+3. 再对 `BGE-M3 query tower` 做 `LoRA`
+4. 训练完成后用 `scripts/compare_query_tower_baseline.py` 对比：
+   - `Recall@k`
+   - `NDCG@k`
+   - `MRR@k`
+   - `recovered_from_miss`
+   - `improved_top1`
    - 各类 query 切片表现
-4. 如果 LoRA 提升有限，再考虑更复杂的 adaptive 方案
+5. 再用 `scripts/compute_route_upgrade_stats.py` 看：
+   - `No Retrieval -> Single-Step` 的升级比例
+   - `Single-Step -> Multi-Hop` 的升级比例
+6. 如果 LoRA 提升有限，再考虑更复杂的 adaptive 方案
 
 原因：
 
-1. 你现在更需要“能解释提升来自哪里”，而不是“先把训练做复杂”。
-2. LoRA 更适合作为第一轮低风险、可归因的实验。
+1. 为什么要训：
+   当前系统的主要瓶颈不在 doc tower，而在医学 query 的表达方式不稳定，比如症状描述口语化、缩写密集、易混疾病共现、同类指标名称相近。Query tower LoRA 可以在不重建整个文档塔的前提下，专门增强“问题如何对齐到正确医学证据”的能力。
+2. 为什么先做 LoRA：
+   LoRA 更适合作为第一轮低风险、可归因的实验。它不会破坏现有 ChromaDB 文档向量，只改 query 侧，方便前后对照。
+3. 训前 baseline 是多少：
+   训练前 baseline 由 `scripts/retrieval_eval.py` 输出；训练完成后的 before/after 对照由 `scripts/compare_query_tower_baseline.py` 统一输出。两者都基于同一套评测样本和同一套检索链路。
+4. 提升来自哪里：
+   不是只看一个总分，而是同时看三层证据：
+   - 检索层：`Recall@k / NDCG@k / MRR@k`
+   - 样本层：`recovered_from_miss`、`improved_top1`
+   - 路由层：`Single-Step -> Multi-Hop` 升级率是否下降
+5. 如果上述三层证据都显示收益明显，再进入更复杂的 adaptive 方案，因果链会更清晰。
 
 ## 6. 当前仍未完全实现或仍需强化的点
 
 下面这些点还没有完全到你简历中“最终结果”的强度：
 
-1. `BGE-M3 query tower` 还没有完成真实医学数据上的 LoRA 训练
+1. `BGE-M3 query tower` 的训练数据构造、训练前 baseline、训练后对比、升级率统计已经补齐，但还没有在真实医学数据上跑出最终数值
 2. `BEIR nfcorpus` 还没有产出真实 benchmark 数值
 3. `Synthetic generation eval` 还没有产出真实 `ROUGE-L / BERTScore` 数值
 4. 还没有单独的 `医学缩写扩展模块`
@@ -514,14 +569,18 @@
 
 建议下一步继续按下面顺序推进：
 
-1. 准备真实医学训练数据
-2. 实跑 `scripts/train_query_tower_lora.py`
-3. 实跑 `scripts/run_beir_nfcorpus_eval.py`
-4. 用训练前/训练后结果对比：
+1. 扩充 `data/train/query_tower_seed_template.jsonl`，覆盖症状问法、缩写问法、药物联用、化验指标等易混 query
+2. 运行 `scripts/build_query_tower_training_data.py`，得到真实训练三元组
+3. 运行 `scripts/retrieval_eval.py`，记录训练前 baseline
+4. 实跑 `scripts/train_query_tower_lora.py`
+5. 运行 `scripts/compare_query_tower_baseline.py`，确认：
    - `Single-Step` 路线提升了哪些 query
+   - 哪些 query 从 miss 变成了 hit
+   - 哪些 query 的 top1 相关文档更靠前
+6. 运行 `scripts/compute_route_upgrade_stats.py`，确认：
    - `No Retrieval` 升级到 `Single-Step` 的比例
    - `Single-Step` 升级到 `Multi-Hop` 的比例
-5. 如果 single-step 提升稳定，再补：
+7. 如果 single-step 提升稳定，再补：
    - 缩写扩展
    - reranker
    - citation
