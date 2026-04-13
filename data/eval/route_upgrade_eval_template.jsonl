@@ -1,3 +1,6 @@
-{"query":"维生素D是什么？","query_type":"parametric_no_retrieval","notes":"常识型问题，可观察是否保持 No Retrieval 直答。"}
-{"query":"高血压患者首先要做哪些生活方式管理？","query_type":"factoid_single_step","notes":"简单医学事实型问题，适合观察 Single-Step 路由是否足够。"}
-{"query":"房颤患者合并慢阻肺和心衰时，抗凝与控率治疗需要注意什么？","query_type":"complex_multi_hop","notes":"复杂多实体医学问题，可用于观察是否会从 Single-Step 升级到 Multi-Hop。"}
+{"query":"HbA1c 是什么？","query_type":"definition_no_retrieval","notes":"低风险定义型问题，用于观察是否保持 No Retrieval 直答。"}
+{"query":"COPD 的常见长期症状有哪些？","query_type":"factoid_single_step","notes":"简单医学事实问题，适合观察是否稳定进入单步检索路线。"}
+{"query":"高血压患者首先要做哪些生活方式管理？","query_type":"guideline_single_step","notes":"局部知识库可覆盖的管理原则问题，适合观察 Single-Step 是否足够。"}
+{"query":"肺炎出现哪些危险信号时需要尽快就医？","query_type":"triage_single_step","notes":"带就医提示的问题，通常应使用检索支撑而不是直答。"}
+{"query":"华法林和阿司匹林能不能联用？","query_type":"high_risk_force_upgrade","notes":"高风险药物联用问题，应至少被风险守卫强制升级到 Single-Step。"}
+{"query":"房颤合并心衰和慢阻肺时，抗凝与控率治疗需要注意什么？","query_type":"complex_multi_hop","notes":"复杂多实体医学问题，用于观察是否会进入或升级到 Multi-Hop。"}

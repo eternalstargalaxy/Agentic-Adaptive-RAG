@@ -3,6 +3,7 @@ import os
 from dotenv import load_dotenv
 
 from graph.embeddings import BGEM3BiEncoderEmbeddings
+from graph.prompt_defaults import DEFAULT_QUERY_TOWER_INSTRUCTION
 
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI
@@ -54,6 +55,6 @@ embed_model = BGEM3BiEncoderEmbeddings(
     query_adapter_path=os.getenv("QUERY_TOWER_ADAPTER_PATH"),
     query_instruction=os.getenv(
         "QUERY_TOWER_INSTRUCTION",
-        "Represent this medical query for retrieving supporting evidence: ",
+        DEFAULT_QUERY_TOWER_INSTRUCTION,
     ),
 )

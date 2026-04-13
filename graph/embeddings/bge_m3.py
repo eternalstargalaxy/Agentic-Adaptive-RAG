@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from typing import List
 
+from graph.prompt_defaults import DEFAULT_QUERY_TOWER_INSTRUCTION
+
 
 @dataclass
 class EncoderRuntime:
@@ -36,7 +38,7 @@ class BGEM3BiEncoderEmbeddings:
         self.query_adapter_path = query_adapter_path
         self.query_instruction = (
             query_instruction
-            or "Represent this medical query for retrieving supporting evidence: "
+            or DEFAULT_QUERY_TOWER_INSTRUCTION
         )
         self.batch_size = batch_size
         self.max_length = max_length

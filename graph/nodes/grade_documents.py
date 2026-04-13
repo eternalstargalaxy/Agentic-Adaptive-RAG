@@ -31,7 +31,7 @@ def _llm_filter_documents(question: str, documents: list, max_docs: int) -> list
         score = retrieval_grader.invoke(
             {"question": question, "document": document.page_content}
         )
-        if score.binary_score.lower() == "yes":
+        if bool(score.binary_score):
             print("---GRADE: DOCUMENT RELEVANT---")
             filtered_docs.append(document)
         else:

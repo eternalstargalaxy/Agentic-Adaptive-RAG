@@ -1,2 +1,5 @@
-{"question":"2型糖尿病患者常见的典型症状有哪些？","reference_answer":"2型糖尿病常见症状包括口渴、多饮、多尿、容易疲劳、体重变化和视物模糊。","prediction":"2型糖尿病常见表现包括口渴、多尿、容易疲劳以及视物模糊，部分患者还会出现体重变化。","sources":["medlineplus_diabetes"]}
-{"question":"COPD 患者常见的长期症状是什么？","reference_answer":"COPD 常见长期症状包括慢性咳嗽、咳痰、活动后气短和呼吸困难。","prediction":"COPD 常见的长期表现包括慢性咳嗽、痰液增多和活动后气短。","sources":["medlineplus_copd"]}
+{"question":"2型糖尿病患者常见的典型症状有哪些？","reference_answer":"2型糖尿病常见症状包括口渴、多饮、多尿、容易疲劳、体重变化、视物模糊以及伤口愈合变慢。","prediction":"2型糖尿病常见表现包括口渴、多尿、疲劳和视物模糊，部分患者还会出现体重变化或伤口愈合变慢。","sources":["guideline_diabetes_001"]}
+{"question":"高血压患者首先应采取哪些生活方式管理措施？","reference_answer":"高血压患者常见的首选生活方式管理包括规律运动、减重、减少钠盐摄入，并结合整体饮食改善。","prediction":"高血压患者首先应重视运动、控制体重和限盐，这些都是重要的一线生活方式干预措施。","sources":["guideline_hypertension_001"]}
+{"question":"肺炎有哪些危险信号提示需要紧急评估？","reference_answer":"肺炎如果出现严重呼吸困难、意识混乱或低氧等表现，应尽快进行紧急评估。","prediction":"肺炎患者若出现明显呼吸困难、意识改变或低氧表现，通常提示需要尽快就医评估。","sources":["guideline_pneumonia_001"]}
+{"question":"心力衰竭常见的症状有哪些？","reference_answer":"心力衰竭常见症状包括气短、疲劳、踝部水肿、运动耐量下降，以及平卧时呼吸困难加重。","prediction":"心力衰竭常见表现包括呼吸困难、疲劳、踝部水肿和活动耐量下降，部分患者平躺时会更喘。","sources":["guideline_heart_failure_001","pubmed_hfpef_001"]}
+{"question":"房颤合并心衰和慢阻肺时治疗上需要综合考虑什么？","reference_answer":"房颤合并心衰和慢阻肺时，需要综合评估抗凝、控率策略、失代偿风险以及出血风险，而不是孤立处理单一疾病。","prediction":"这类患者的治疗需要同时考虑抗凝方案、控率药物选择、心衰失代偿风险和出血风险，不能只看某一个疾病。","sources":["pubmed_af_copd_hf_001"]}

@@ -1,3 +1,5 @@
+from textwrap import dedent
+
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableSequence
 from pydantic import BaseModel, Field
@@ -11,21 +13,39 @@ class GradeHallucinations(BaseModel):
     """
 
     binary_score: bool = Field(
-        description="Answer is grounded in the facts, 'yes' or 'no'."
+        description="True if the answer is grounded in the provided evidence."
     )
 
 
 structured_llm_grader = grader_model.with_structured_output(GradeHallucinations)
 
-system = """
-You are a grader assessing whether an LLM generation is grounded in a set of retrieved facts.
-Give a binary score 'yes' or 'no'. 'Yes' means the answer is supported by the facts.
-"""
+system = dedent(
+    """
+    You are the grounding judge for a medical RAG system.
+
+    Return true only when the material claims in the answer are supported by the provided evidence,
+    or when the answer explicitly and conservatively says that the evidence is insufficient.
+
+    Return false when the answer introduces unsupported:
+    - diagnoses,
+    - treatment claims,
+    - contraindications or drug interactions,
+    - numerical thresholds or medication details,
+    - certainty that is not justified by the evidence,
+    - fabricated source statements.
+    """
+).strip()
 
 hallucination_prompt = ChatPromptTemplate.from_messages(
     [
         ("system", system),
-        ("human", "Set of facts:\n\n{documents}\n\nLLM generation:\n{generation}"),
+        (
+            "human",
+            "User question:\n{question}\n\n"
+            "Evidence:\n{documents}\n\n"
+            "Generated answer:\n{generation}\n\n"
+            "Is the answer grounded in the evidence?",
+        ),
     ]
 )
 

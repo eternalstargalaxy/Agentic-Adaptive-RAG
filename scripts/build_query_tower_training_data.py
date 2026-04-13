@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from graph.embeddings import BGEM3BiEncoderEmbeddings
+from graph.prompt_defaults import DEFAULT_QUERY_TOWER_INSTRUCTION
 from graph.retrieval_eval_utils import build_relevance_flags, load_jsonl
 
 
@@ -270,7 +271,7 @@ def main() -> None:
     parser.add_argument("--model-name", default="BAAI/bge-m3")
     parser.add_argument(
         "--query-instruction",
-        default="Represent this medical query for retrieving supporting evidence: ",
+        default=DEFAULT_QUERY_TOWER_INSTRUCTION,
     )
     parser.add_argument("--top-k", type=int, default=8)
     args = parser.parse_args()

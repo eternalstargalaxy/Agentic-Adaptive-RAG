@@ -7,10 +7,16 @@ from graph.chains.hallucination_grader import hallucination_grader
 
 
 def _stringify_documents(documents: List[Any]) -> str:
-    return "\n\n".join(
-        getattr(document, "page_content", str(document))
-        for document in documents
-    )
+    blocks = []
+    for index, document in enumerate(documents, start=1):
+        metadata = getattr(document, "metadata", {}) or {}
+        header = (
+            f"[Document {index} | "
+            f"title={metadata.get('title', '') or 'unknown'} | "
+            f"source={metadata.get('source', '') or metadata.get('url', '') or 'unknown'}]"
+        )
+        blocks.append(f"{header}\n{getattr(document, 'page_content', str(document))}")
+    return "\n\n".join(blocks)
 
 
 def _safe_ragas_faithfulness(question: str, generation: str, documents: List[Any]) -> float | None:
@@ -59,7 +65,11 @@ def evaluate_generation(
         grounded = faithfulness >= 0.5
     else:
         grounding_grade = hallucination_grader.invoke(
-            {"documents": _stringify_documents(documents), "generation": generation}
+            {
+                "question": question,
+                "documents": _stringify_documents(documents),
+                "generation": generation,
+            }
         )
         grounded = bool(grounding_grade.binary_score)
         grounding_source = "llm_fallback"
