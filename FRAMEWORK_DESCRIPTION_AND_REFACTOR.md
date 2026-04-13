@@ -1,10 +1,10 @@
-# Agentic Adaptive RAG 框架说明、医学域化设计、改造记录与简历点映射
+# 医学域自适应 RAG 系统框架说明、改造记录与简历点映射
 
 ## 1. 文档目标
 
 这份文档有四个目的：
 
-1. 把当前仓库从“原始 Agentic Adaptive RAG demo”到“医学域自适应 RAG 系统”的整体逻辑讲清楚。
+1. 把当前仓库从“原始 Agentic Adaptive RAG 演示仓库”到“医学域自适应 RAG 系统”的整体逻辑讲清楚。
 2. 记录已经实施的改造内容、改造顺序、每一项改造的原因与价值。
 3. 把你的简历表述逐条映射到仓库中的具体模块、脚本和工程边界。
 4. 明确区分“框架级已经实现”与“真实实验数值还需要实跑”，保证后续写简历、答辩、面试时说法一致。
@@ -17,22 +17,22 @@
 
 ### 2.1 原始仓库的基础能力
 
-原始 `Agentic Adaptive RAG` 仓库本身已经具备以下基础：
+原始 `Agentic Adaptive RAG` 仓库本身已经具备以下基础能力：
 
-- 用 `LangGraph` 组织 query rewrite、检索、联网搜索、生成、评估、重试的闭环。
+- 用 `LangGraph` 组织查询改写、检索、联网搜索、生成、评估、重试的闭环。
 - 用 LLM 做路由、改写、文档判别、答案评估。
-- 在检索不足时可以触发 web search，再回到生成阶段。
+- 在检索不足时可以触发联网搜索，再回到生成阶段。
 
-它的本质是一个“带自适应重试能力的 agentic RAG”。
+它的本质是一个“带自适应重试能力的智能体式 RAG 系统”。
 
 ### 2.2 本次改造后的目标系统
 
-本次改造的目标，不是把它堆成一个更大的 demo，而是把它演进为一个更贴近你简历描述的：
+本次改造的目标，不是把它堆成一个更大的演示系统，而是把它演进为一个更贴近你简历描述的：
 
 - `医学域自适应 RAG 系统`
-- `保留 Query Router 的三级动态分流机制`
-- `以混合检索 + reranker + 风险守卫 + 多轮补证为核心`
-- `具备 query tower LoRA 训练闭环`
+- `保留 Query Router 三级动态分流机制`
+- `以混合检索 + 重排层 + 风险守卫 + 多轮补证为核心`
+- `具备查询塔 LoRA 训练闭环`
 - `具备 MCP 兼容的工具接入边界`
 - `具备版本化语料治理与标准化评测入口`
 
@@ -41,25 +41,25 @@
 这个系统最关键的，不是“用了多少模块”，而是它把以下几层真正串起来了：
 
 1. `策略层`
-   - Query Router 决定 `No Retrieval / Single-Step / Multi-Hop`
+   - 查询路由器决定 `No Retrieval / Single-Step / Multi-Hop`
    - 风险路由层防止高风险医学问题走直答
 
 2. `证据层`
-   - 本地 ChromaDB + BM25 + BGE-M3 + RRF + BGE-M3 rerank
-   - HyDE 扩充短 query 和模糊 query 的召回空间
+   - 本地 ChromaDB + BM25 + BGE-M3 + RRF + BGE-M3 重排
+   - HyDE 扩充短查询和模糊查询的召回空间
    - 本地语料不足时触发 Tavily + PubMed + 医学白名单搜索
 
 3. `控制层`
-   - LangGraph state 持续记录路由、检索轮次、风险等级、route history、评估结果
+   - LangGraph 状态持续记录路由、检索轮次、风险等级、路由历史、评估结果
    - 生成失败、证据不足、幻觉风险时触发升级与重试
 
 4. `训练与评测层`
-   - Query tower LoRA 的训练数据构造、训练、训练前后对比
-   - 检索指标、路由升级率、生成指标、benchmark 脚手架
+   - 查询塔 LoRA 的训练数据构造、训练、训练前后对比
+   - 检索指标、路由升级率、生成指标、标准评测脚手架
 
 一句话概括：
 
-> 当前仓库已经不再是“检索一下再回答”的 RAG demo，而是一个具有动态路由、医学安全边界、训练闭环和外部工具边界的医学域 agentic RAG 框架。
+> 当前仓库已经不再是“检索一下再回答”的 RAG 演示项目，而是一个具有动态路由、医学安全边界、训练闭环和外部工具边界的医学域自适应 RAG 框架。
 
 ---
 
@@ -67,13 +67,13 @@
 
 为了后续答辩更清楚，先把“到底改了什么”总结成最核心的七条：
 
-1. 从 `固定 retrieve-then-generate` 升级为 `LLM Query Router 驱动的三级动态分流`
+1. 从“固定先检索后生成”升级为 `LLM Query Router` 驱动的三级动态分流
 2. 在原路由之上增加 `高风险医学问题禁止 No Retrieval 直答` 的风险守卫
-3. 把 `Single-Step` 从“LLM 逐篇筛文档”改成“混合检索 + reranker + 少量 LLM”
-4. 从 demo 语料升级到 `版本化 corpus pipeline`
-5. 从抽象 MCP client 升级到 `抽象层 + 真实 stdio MCP transport`
-6. 为 BGE-M3 query tower 补齐 `LoRA + InfoNCE + before/after baseline 对比闭环`
-7. 为简历中提到的 benchmark 和质量评估补齐 `可运行脚手架`
+3. 把 `Single-Step` 从“LLM 逐篇筛文档”改成“混合检索 + 重排层 + 少量 LLM”
+4. 从演示语料升级到 `版本化语料管线`
+5. 从抽象 MCP 客户端升级到 `抽象层 + 真实 stdio MCP 传输层`
+6. 为 BGE-M3 查询塔补齐 `LoRA + InfoNCE + 训练前后基线对比闭环`
+7. 为简历中提到的标准评测和质量评估补齐 `可运行脚手架`
 
 这七条合在一起，才真正支撑“医学域自适应 RAG 系统”这个项目叙事。
 
@@ -87,24 +87,24 @@
 
 ```mermaid
 flowchart TD
-    A["用户问题"] --> B["rewrite_query"]
-    B --> C["LLM Query Router"]
-    C --> D{"route_strategy"}
-    D -->|No Retrieval| E["generate"]
-    D -->|Single-Step| F["retrieve"]
+    A["用户问题"] --> B["查询改写"]
+    B --> C["LLM 查询路由"]
+    C --> D{"路由策略"}
+    D -->|No Retrieval| E["回答生成"]
+    D -->|Single-Step| F["本地检索"]
     D -->|Multi-Hop| F
-    B --> G["risk guardrail"]
+    B --> G["风险守卫"]
     G --> D
-    F --> H["grade_documents"]
-    H -->|enough evidence| E
-    H -->|need web evidence| I["web_search"]
-    H -->|need another local round| F
+    F --> H["文档筛选"]
+    H -->|证据足够| E
+    H -->|需要联网补证| I["联网搜索"]
+    H -->|需要继续本地检索| F
     I --> E
-    E --> J["evaluate_generation"]
-    J -->|accepted| K["end"]
-    J -->|retry current context| E
-    J -->|escalate route and rewrite| B
-    J -->|fallback web search| I
+    E --> J["回答评估"]
+    J -->|通过| K["结束"]
+    J -->|当前上下文重试| E
+    J -->|升级路线并重写| B
+    J -->|回退到联网搜索| I
 ```
 
 ### 4.2 图中的关键控制信息
@@ -139,7 +139,7 @@ flowchart TD
 
 1. 先判断问题该走哪种成本层级
 2. 再决定是否检索、本地检索几轮、是否联网补证
-3. 最后根据 groundedness 和 answer quality 决定是否升级路线
+3. 最后根据事实依据充分性和回答质量决定是否升级路线
 
 所以这个仓库真正的创新点不是单一模块，而是：
 
@@ -149,7 +149,7 @@ flowchart TD
 
 ## 5. 三级动态路由机制
 
-### 5.1 No Retrieval 路线
+### 5.1 直答路线（No Retrieval）
 
 #### 目标
 
@@ -181,12 +181,12 @@ flowchart TD
 - 这是系统“智能分流”的第一层，决定系统不是所有问题都走高成本检索。
 - 对线上服务场景，它直接影响平均响应时延和成本。
 
-### 5.2 Single-Step 路线
+### 5.2 单步检索路线（Single-Step）
 
 #### 目标
 
 - 用一轮高质量检索解决大部分简单事实型医学问题。
-- 把更多问题拦截在低成本路径，不轻易升级到 multi-hop。
+- 把更多问题拦截在低成本路径，不轻易升级到多跳推理路线。
 
 #### 当前执行路径
 
@@ -196,16 +196,16 @@ flowchart TD
 4. `generate`
 5. `evaluate_generation`
 
-#### 当前 Single-Step 的实现方式
+#### 当前单步检索路线的实现方式
 
-现在的 single-step 已经不是“召回一堆文档，再让 LLM 一篇篇看”，而是：
+现在的单步检索路线已经不是“召回一堆文档，再让 LLM 一篇篇看”，而是：
 
-1. 改写后的 query 进入本地检索
-2. 必要时对首轮 query 启用 HyDE
+1. 改写后的查询进入本地检索
+2. 必要时对首轮查询启用 HyDE
 3. 通过 `BM25 + BGE-M3` 双路召回
 4. 用 `RRF` 融合召回结果
 5. 用 `BGE-M3 reranker` 对候选文档重排
-6. 如果重排分数足够自信，则直接保留 top 文档
+6. 如果重排分数足够自信，则直接保留排序靠前的文档
 7. 如果不够自信，再调用少量 LLM 做补充筛选
 
 #### 对应模块
@@ -219,10 +219,10 @@ flowchart TD
 #### 价值
 
 - 这条路线承接了“简单事实问答”的主流流量。
-- query tower LoRA 的收益，最直接也最核心地体现在这条路线。
-- reranker 加入后，single-step 的工程含义更接近“检索系统”而不是“LLM 大包大揽”。
+- 查询塔 LoRA 的收益，最直接也最核心地体现在这条路线。
+- 重排层加入后，单步检索路线的工程含义更接近“检索系统”而不是“LLM 大包大揽”。
 
-### 5.3 Multi-Hop 路线
+### 5.3 多跳推理路线（Multi-Hop）
 
 #### 目标
 
@@ -263,7 +263,7 @@ flowchart TD
 
 #### 设计动机
 
-如果完全信任 LLM router，医学场景会有一个明显问题：
+如果完全信任 LLM 路由器，医学场景会有一个明显问题：
 
 - 有些高风险问题在语言形式上看起来很简单
 - 但它们从业务安全角度不应该允许模型直答
@@ -294,7 +294,7 @@ flowchart TD
 #### 价值
 
 - 这是整个系统医学安全边界的关键补丁。
-- 它保留了 Query Router 的智能性，但不把安全决策完全交给 router。
+- 它保留了 Query Router 的智能性，但不把安全决策完全交给路由模型本身。
 
 ### 5.5 路由升级逻辑
 
@@ -304,7 +304,7 @@ flowchart TD
    - 直答后如果未回答问题，自动升级
 
 2. `Single-Step -> Multi-Hop`
-   - 如果 groundedness 不够或问题未被覆盖，升级到 multi-hop
+   - 如果证据支撑不够或问题未被覆盖，升级到多跳推理路线
 
 3. `Multi-Hop -> Retry / Web Search`
    - 如果仍然不足，继续补证或重试
@@ -326,41 +326,41 @@ flowchart TD
 - `BM25` 负责关键词与术语匹配
 - `BGE-M3` 负责语义召回
 - `RRF` 负责融合稀疏与稠密结果
-- `BGE-M3 reranker` 负责候选重排
+- `BGE-M3 reranker` 负责候选文档重排
 - `LLM` 仅在重排不确定时补充筛选
 
-这个设计比单纯的 dense retrieval 更稳健，因为医学问答有两个特点：
+这个设计比单纯的稠密检索更稳健，因为医学问答有两个特点：
 
 1. 专有名词、缩写、药名、检查项非常多，关键词匹配依旧重要
 2. 同一医学含义可能有多种问法，语义召回也不能少
 
-### 6.2 HyDE 的角色
+### 6.2 HyDE 的作用
 
-HyDE 当前主要用于处理以下 query：
+HyDE 当前主要用于处理以下查询：
 
-- 很短的 query
-- 描述不完整的 query
+- 很短的查询
+- 描述不完整的查询
 - 症状口语化表达
 - 医学缩写或模糊问法
 
-它的作用不是替代原 query，而是额外生成一个“假设性文档表达”加入首轮检索，扩大召回空间。
+它的作用不是替代原始查询，而是额外生成一个“假设性文档表达”加入首轮检索，扩大召回空间。
 
 对应模块：
 
 - `graph/chains/hyde.py`
 - `graph/nodes/retrieve.py`
 
-### 6.3 Reranker 的工程意义
+### 6.3 重排层的工程意义
 
-加入 reranker 后，single-step 的行为发生了明显变化：
+加入重排层后，单步检索路线的行为发生了明显变化：
 
 - 之前更像“召回 -> LLM 广泛判别”
 - 现在更像“召回 -> 机器排序 -> 少量 LLM 辅助”
 
 它有两个直接收益：
 
-1. 减少 LLM 在 single-step 中的介入成本
-2. 让 query tower LoRA 的提升更容易体现在排序前部，而不是被后续 LLM 流程冲淡
+1. 减少 LLM 在单步检索路线中的介入成本
+2. 让查询塔 LoRA 的提升更容易体现在排序前部，而不是被后续 LLM 流程冲淡
 
 对应模块：
 
@@ -370,7 +370,7 @@ HyDE 当前主要用于处理以下 query：
 
 ### 6.4 证据上下文的结构化输入
 
-`graph/nodes/generate.py` 当前会把检索到的证据组织成带 metadata 的上下文块，至少包含：
+`graph/nodes/generate.py` 当前会把检索到的证据组织成带元数据的上下文块，至少包含：
 
 - `title`
 - `source`
@@ -380,7 +380,7 @@ HyDE 当前主要用于处理以下 query：
 这样做的意义是：
 
 - 让生成模型看到的不只是正文片段
-- 也让后续做 citation、source policy、证据展示更容易继续演进
+- 也让后续做引用标注、来源策略、证据展示更容易继续演进
 
 ### 6.5 当前检索层的真实定位
 
@@ -389,7 +389,7 @@ HyDE 当前主要用于处理以下 query：
 但需要诚实说明：
 
 - 结构已实现
-- 真实 benchmark 数值仍需实跑
+- 真实基准评测数值仍需实跑
 
 ---
 
@@ -426,11 +426,11 @@ HyDE 当前主要用于处理以下 query：
 - 医学问答不能把开放网页与权威医学来源混在一起
 - 白名单是最简单、最实用、最能快速降低噪声的第一层治理
 
-### 7.3 PubMed / 医学网页 / 通用网页三类工具分层
+### 7.3 PubMed、医学网页、通用网页三类工具分层
 
 这是一个非常重要但容易被忽略的设计点。
 
-当前仓库不是只有一个“web_search”，而是把外部证据源分成三类：
+当前仓库不是只有一个“联网搜索”，而是把外部证据源分成三类：
 
 1. `PubMed`
    - 更偏向文献与摘要
@@ -443,21 +443,21 @@ HyDE 当前主要用于处理以下 query：
 
 这个分层的好处是：
 
-- 后续可以做更细的 source policy
+- 后续可以做更细的来源策略
 - 高风险问题可以优先依赖高可信来源
 - 生成阶段更容易解释证据来源
 
-### 7.4 MCP 抽象层与真实 stdio transport
+### 7.4 MCP 抽象层与真实 stdio 传输层
 
 当前 MCP 不是“只写了一个概念接口”，而是已经具备两层能力：
 
 1. `In-process MCP client`
    - 默认可运行
-   - 本地 handler 直接注册工具
+   - 本地处理器直接注册工具
 
 2. `真实 stdio MCP transport`
-   - 可通过外部 MCP server 接入远程工具
-   - 通过环境变量注册 command、args、tool aliases
+   - 可通过外部 MCP 服务接入远程工具
+   - 通过环境变量注册命令、参数和工具别名
 
 对应模块：
 
@@ -471,20 +471,20 @@ HyDE 当前主要用于处理以下 query：
 当前 MCP 已经足够支持“项目亮点级”表述，但仍然属于第一版工程边界：
 
 - 已实现：
-  - tool listing
-  - tool call
-  - alias 映射
-  - in-process 与 stdio 双模式共存
+  - 工具枚举
+  - 工具调用
+  - 别名映射
+  - 进程内与 stdio 双模式共存
 
 - 尚未完全强化：
-  - 更丰富的 schema 校验
+  - 更丰富的模式校验
   - 更细的错误恢复策略
-  - 流式 transport 管理
+  - 流式传输管理
   - 复杂认证与会话复用
 
 因此更准确的说法是：
 
-> 当前仓库已经完成了 MCP client abstraction 到真实 stdio MCP transport 的工程落地，具备进一步扩展为统一工具接入层的基础。
+> 当前仓库已经完成了 MCP 客户端抽象到真实 stdio MCP 传输层的工程落地，具备进一步扩展为统一工具接入层的基础。
 
 ---
 
@@ -492,9 +492,9 @@ HyDE 当前主要用于处理以下 query：
 
 这一部分是本项目从通用 RAG 走向“医学域系统”的核心。
 
-### 8.1 Corpus 设计
+### 8.1 语料设计
 
-当前语料治理已经从“几条 seed url”升级为：
+当前语料治理已经从“几条种子链接”升级为：
 
 - `profile`
 - `corpus_version`
@@ -504,12 +504,12 @@ HyDE 当前主要用于处理以下 query：
 
 也就是“配置化 + 版本化 + 资产分层”的方式。
 
-#### 当前 corpus profile
+#### 当前语料配置
 
 - `general_ai`
 - `medical_demo`
 
-其中 `medical_demo` 是当前默认的医学域 profile。
+其中 `medical_demo` 是当前默认的医学域语料配置。
 
 #### 当前医学语料资产
 
@@ -521,32 +521,32 @@ HyDE 当前主要用于处理以下 query：
 
 其中：
 
-- `guideline_pages` 和 `pubmed_abstracts` 用于 `serve`
-- `nfcorpus_eval_registry` 用于 `eval`
+- `guideline_pages` 和 `pubmed_abstracts` 用于在线服务
+- `nfcorpus_eval_registry` 用于离线评测
 
 #### 为什么要这么拆
 
 如果服务语料和评测语料混在一起，会带来两个问题：
 
 1. 很难控制线上知识来源
-2. 很难保证 benchmark 的可解释性
+2. 很难保证基准评测的可解释性
 
 所以当前仓库已经明确把“提供答案的语料”和“用来评测的注册表”分开管理。
 
-### 8.2 Benchmark 设计
+### 8.2 评测设计
 
-当前 benchmark 被分成三层：
+当前评测体系被分成三层：
 
-1. `检索层 benchmark`
+1. `检索层评测`
    - `BEIR nfcorpus`
    - 本地医学检索评测集模板
 
-2. `路由层 benchmark`
-   - route upgrade 评测集
+2. `路由层评测`
+   - 路由升级评测集
    - 用来观察不同路径之间的升级率
 
-3. `生成层 benchmark`
-   - synthetic generation test set
+3. `生成层评测`
+   - 合成生成评测集
    - `ROUGE-L`
    - `BERTScore`
 
@@ -555,13 +555,13 @@ HyDE 当前主要用于处理以下 query：
 - 不把系统能力压缩成一个单一总分
 - 能回答“提升到底来自检索、路由还是生成”
 
-### 8.3 Query Tower 训练策略
+### 8.3 查询塔训练策略
 
 这是当前最关键的医学域化训练方向。
 
-#### 为什么训练 query tower
+#### 为什么训练查询塔
 
-当前系统最容易出问题的地方，不一定是文档库本身，而是医学 query 的表达形式：
+当前系统最容易出问题的地方，不一定是文档库本身，而是医学查询的表达形式：
 
 - 症状口语化
 - 缩写多
@@ -569,19 +569,19 @@ HyDE 当前主要用于处理以下 query：
 - 疾病容易混淆
 - 指标名和检查项表述不统一
 
-也就是说，问题往往不是“没有正确文档”，而是“query 没有把正确文档拉到前面”。
+也就是说，问题往往不是“没有正确文档”，而是“查询没有把正确文档拉到前面”。
 
-#### 为什么先不训练 doc tower
+#### 为什么先不训练文档塔
 
-当前仓库优先选择只训练 query tower，原因有三点：
+当前仓库优先选择只训练查询塔，原因有三点：
 
-1. 文档向量已经入库到 ChromaDB，保持 doc tower 稳定更便于前后对照
-2. query tower LoRA 成本更低，实验闭环更清晰
-3. 如果先训 doc tower，会牵动重新建库、重新评测、变量更多，不利于解释收益来源
+1. 文档向量已经入库到 ChromaDB，保持文档塔稳定更便于前后对照
+2. 查询塔 LoRA 成本更低，实验闭环更清晰
+3. 如果先训文档塔，会牵动重新建库、重新评测、变量更多，不利于解释收益来源
 
 #### 为什么采用 LoRA
 
-当前阶段优先用 LoRA，而不是更重的 adaptive 方案，原因是：
+当前阶段优先用 LoRA，而不是更重的自适应方案，原因是：
 
 1. 低成本
 2. 易于增量试验
@@ -609,7 +609,7 @@ HyDE 当前主要用于处理以下 query：
 
 训练目标是：
 
-- 让医学 query 更贴近正确文档
+- 让医学查询更贴近正确文档
 - 与易混淆错误文档拉开距离
 
 这与“医学域易混知识分离”的目标是完全一致的。
@@ -622,7 +622,7 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 
 1. 接入搜索工具
 2. 接入文献服务或外部知识工具
-3. 为未来的 citation、知识服务、规则服务提供统一调用接口
+3. 为未来的引用标注、知识服务、规则服务提供统一调用接口
 
 当前不建议把 MCP 夸大为“系统智能性的来源”，更准确的说法是：
 
@@ -649,7 +649,7 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
    - `graph/corpus_pipeline.py`
    - `data/corpus/medical_demo/v1/*`
 
-2. MCP client 抽象层
+2. MCP 客户端抽象层
    - `graph/mcp/client.py`
    - `graph/mcp/registry.py`
 
@@ -657,7 +657,7 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
    - `graph/search/providers.py`
    - `graph/nodes/web_search.py`
 
-4. retrieval eval 脚本骨架
+4. 检索评测脚本骨架
    - `scripts/retrieval_eval.py`
    - `scripts/run_beir_nfcorpus_eval.py`
    - `scripts/evaluate_synthetic_generation.py`
@@ -667,11 +667,11 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 - 如果没有语料、评测、工具边界，训练出来的模型也很难解释收益。
 - 这一步先解决“系统是否能站住”的问题。
 
-### 9.2 第二批改造：补 Query Tower LoRA 训练闭环
+### 9.2 第二批改造：补查询塔 LoRA 训练闭环
 
 这一阶段的目标是：
 
-- 让 query tower 训练变成一个可复现、可对照、可解释的实验链路
+- 让查询塔训练变成一个可复现、可对照、可解释的实验链路
 
 #### 已做内容
 
@@ -685,7 +685,7 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
    - `data/train/query_tower_seed_template.jsonl`
    - `data/train/query_tower_lora_template.jsonl`
 
-4. 训练前 baseline 对比
+4. 训练前基线对比
    - `scripts/retrieval_eval.py`
    - `scripts/compare_query_tower_baseline.py`
 
@@ -693,14 +693,14 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
    - `scripts/compute_route_upgrade_stats.py`
    - `scripts/compare_route_upgrade_baseline.py`
 
-6. 统一 before/after 总报告
+6. 统一训练前后总报告
    - `scripts/compare_training_before_after.py`
 
 #### 这样做的原因
 
 - 你后续必须能非常清楚地回答三个问题：
   - 为什么要训
-  - 训前 baseline 是多少
+  - 训前基线是多少
   - 提升来自哪里
 
 如果没有这一整套闭环，这三个问题是答不稳的。
@@ -715,12 +715,12 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
    - `graph/risk_guardrails.py`
    - `graph/nodes/rewrite_query.py`
 
-2. reranker 层
+2. 重排层
    - `graph/rerankers/bge_m3.py`
    - `graph/nodes/retrieve.py`
    - `graph/nodes/grade_documents.py`
 
-3. 真实 stdio MCP transport
+3. 真实 stdio MCP 传输层
    - `graph/mcp/transports.py`
    - `configs/mcp_stdio.example.env`
 
@@ -732,9 +732,9 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 #### 这样做的原因
 
 - 风险路由层保证医疗安全边界
-- reranker 直接改善首轮证据质量，ROI 通常高于继续堆 agent
-- 真实 MCP transport 让“支持 MCP”从概念变成可落地的工程接口
-- 语料治理让系统从 demo 数据走向可迭代数据资产
+- 重排层直接改善首轮证据质量，投入产出比通常高于继续堆更多智能体
+- 真实 MCP 传输层让“支持 MCP”从概念变成可落地的工程接口
+- 语料治理让系统从演示数据走向可迭代数据资产
 
 ### 9.4 当前改造顺序的合理性
 
@@ -752,13 +752,13 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 
 ---
 
-## 10. Query Tower LoRA 的训练与评测闭环
+## 10. 查询塔 LoRA 的训练与评测闭环
 
 这一节专门回答你最看重的三个问题。
 
 ### 10.1 为什么要训
 
-当前系统在 single-step 路线上，最值得优化的是 query 对医学证据空间的对齐能力。
+当前系统在单步检索路线上，最值得优化的是查询对医学证据空间的对齐能力。
 
 原因不是“BGE-M3 不够强”，而是医学查询的天然难点：
 
@@ -769,11 +769,11 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 - 检查项别名
 - 多实体联合语境
 
-这会导致问题虽然能被 router 判断成 single-step，但检索排序前列未必是最对的文档。
+这会导致问题虽然能被路由器判断成单步检索路线，但检索排序前列未必是最对的文档。
 
-所以训练 query tower 的目标非常明确：
+所以训练查询塔的目标非常明确：
 
-> 让正确医学文档更容易被排到前面，从而减少 single-step 失败后被迫升级到 multi-hop 的比例。
+> 让正确医学文档更容易被排到前面，从而减少单步检索失败后被迫升级到多跳推理路线的比例。
 
 ### 10.2 训练数据怎么构造
 
@@ -781,20 +781,20 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 
 其核心思路是：
 
-1. 从种子 query 出发
+1. 从种子查询出发
 2. 用当前检索器找到正例文档
-3. 从最容易混淆的候选中挖掘 hard negative
+3. 从最容易混淆的候选中挖掘困难负例
 4. 输出 `(query, positive, confusable_negative)` 三元组
 
 这种构造方式的意义很大：
 
-- negative 不是随机负例
+- 负例不是随机负例
 - 而是“当前系统最容易搞错的负例”
 - 因此它直接对齐真实系统错误模式
 
-### 10.3 训前 baseline 是多少
+### 10.3 训前基线是多少
 
-当前仓库已经把“训前 baseline 应该怎么测”落实成脚本：
+当前仓库已经把“训前基线应该怎么测”落实成脚本：
 
 - `scripts/retrieval_eval.py`
 - `scripts/compare_query_tower_baseline.py`
@@ -812,8 +812,8 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 这意味着你可以单独回答：
 
 - `Single-Step` 路线在训练前的召回与排序效果如何
-- 哪类 query 最弱
-- 哪类 query 最值得训练
+- 哪类查询最弱
+- 哪类查询最值得训练
 
 ### 10.4 提升来自哪里
 
@@ -840,16 +840,16 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 
 ### 10.5 统一报告会输出什么
 
-`scripts/compare_training_before_after.py` 会把以下内容汇总到同一份 JSON：
+`scripts/compare_training_before_after.py` 会把以下内容汇总到同一份 JSON 报告：
 
-- single-step 的训练前后检索指标
-- no-retrieval 升级到 single-step 的比例
-- single-step 升级到 multi-hop 的比例
-- before/after 差值
+- 单步检索路线的训练前后检索指标
+- 直答路线升级到单步检索路线的比例
+- 单步检索路线升级到多跳推理路线的比例
+- 训练前后差值
 
 所以它本质上是在回答：
 
-1. 训练前 baseline 是多少
+1. 训练前基线是多少
 2. 训练后变好了没有
 3. 是检索变好了，还是路由升级率下降了
 
@@ -859,15 +859,15 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 
 - 训练数据构造
 - 训练脚本
-- baseline 脚本
-- before/after 对比脚本
+- 基线脚本
+- 训练前后对比脚本
 - 升级率统计脚本
 
 但当前还没有在真实医学实验环境中跑出最终数值。
 
 因此准确表述应该是：
 
-> Query tower LoRA 的训练与评测闭环已经工程化落地，当前待补的是实跑结果，而不是方法本身。
+> 查询塔 LoRA 的训练与评测闭环已经工程化落地，当前待补的是实跑结果，而不是方法本身。
 
 ---
 
@@ -878,10 +878,10 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 当前检索阶段的评测分为两类：
 
 1. `本地医学检索评测集`
-   - 用于 single-step 的核心 before/after 对比
+   - 用于单步检索路线的核心训练前后对比
 
 2. `BEIR nfcorpus`
-   - 用于标准 benchmark 入口
+   - 用于标准基准评测入口
 
 对应模块：
 
@@ -917,13 +917,13 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 - `ROUGE-L`
 - `BERTScore`
 
-### 11.4 Faithfulness 评测
+### 11.4 真实性评测
 
 当前系统优先使用：
 
 - `RAGAS faithfulness`
 
-若本地环境不满足 ragas 依赖，再退回到 LLM grader。
+若本地环境不满足 ragas 依赖，再退回到 LLM 评估器。
 
 对应模块：
 
@@ -933,7 +933,7 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 
 这套评测体系解决的是一个经常被忽略的问题：
 
-> 一个 agentic RAG 项目不能只拿一个最终准确率来讲，因为你说不清提升到底来自哪一层。
+> 一个智能体式 RAG 项目不能只拿一个最终准确率来讲，因为你说不清提升到底来自哪一层。
 
 当前仓库已经把这个问题拆清楚了：
 
@@ -951,27 +951,27 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 | 简历点 | 当前状态 | 对应模块 | 当前可怎么讲 |
 | --- | --- | --- | --- |
 | 基于 LLM 的 Query Router 动态路由机制 | 已实现 | `graph/chains/router.py` `graph/nodes/rewrite_query.py` `graph/graph.py` | 可以直接讲，且已保留三级动态分流 |
-| No Retrieval / Single-Step / Multi-Hop 三级分流 | 已实现 | `graph/graph.py` `graph/nodes/evaluate_generation.py` | 可以直接讲 |
+| 直答 / 单步检索 / 多跳推理三级分流 | 已实现 | `graph/graph.py` `graph/nodes/evaluate_generation.py` | 可以直接讲 |
 | 高风险医学问题禁止直答 | 已实现 | `graph/risk_guardrails.py` | 可以直接讲，这是当前系统安全亮点之一 |
-| 短/模糊 query 使用 HyDE | 已实现 | `graph/chains/hyde.py` `graph/nodes/retrieve.py` | 可以直接讲 |
+| 短查询或模糊查询使用 HyDE | 已实现 | `graph/chains/hyde.py` `graph/nodes/retrieve.py` | 可以直接讲 |
 | 首轮混合检索：BM25 + BGE-M3 + RRF | 已实现 | `ingestion.py` `graph/embeddings/bge_m3.py` | 可以直接讲 |
-| Single-Step 采用 reranker 提升精排质量 | 已实现 | `graph/rerankers/bge_m3.py` `graph/nodes/retrieve.py` `graph/nodes/grade_documents.py` | 可以直接讲 |
-| Single-Step 从“LLM 全量筛文档”升级为“检索 + reranker + 少量 LLM” | 已实现 | `graph/nodes/grade_documents.py` | 可以直接讲，且很有工程价值 |
-| Multi-Hop 多轮补证闭环 | 已实现 | `graph/chains/gap_analyzer.py` `graph/nodes/web_search.py` `graph/nodes/evaluate_generation.py` | 可以直接讲 |
+| 单步检索路线采用重排层提升精排质量 | 已实现 | `graph/rerankers/bge_m3.py` `graph/nodes/retrieve.py` `graph/nodes/grade_documents.py` | 可以直接讲 |
+| 单步检索从“LLM 全量筛文档”升级为“检索 + 重排层 + 少量 LLM” | 已实现 | `graph/nodes/grade_documents.py` | 可以直接讲，且很有工程价值 |
+| 多跳推理闭环 | 已实现 | `graph/chains/gap_analyzer.py` `graph/nodes/web_search.py` `graph/nodes/evaluate_generation.py` | 可以直接讲 |
 | Tavily API 网络搜索 | 已实现 | `graph/search/providers.py` | 可以直接讲 |
 | PubMed / 医学网页 / 通用网页分层搜索 | 已实现 | `graph/search/providers.py` `graph/mcp/registry.py` | 可以直接讲 |
 | 本地向量库使用 ChromaDB | 已实现 | `ingestion.py` | 可以直接讲 |
 | RAGAS faithfulness 替代纯 LLM 自评 | 已实现 | `graph/evaluation.py` | 可以直接讲 |
-| BGE-M3 query tower LoRA | 训练闭环已实现，实测结果待跑 | `scripts/train_query_tower_lora.py` `graph/embeddings/bge_m3.py` | 可以讲方法与闭环，数值需实跑后再写死 |
-| BGE-M3 query tower LoRA 采用 InfoNCE 对比学习 | 已实现 | `scripts/train_query_tower_lora.py` `scripts/build_query_tower_training_data.py` | 可以直接讲 |
+| BGE-M3 查询塔 LoRA | 训练闭环已实现，实测结果待跑 | `scripts/train_query_tower_lora.py` `graph/embeddings/bge_m3.py` | 可以讲方法与闭环，数值需实跑后再写死 |
+| BGE-M3 查询塔 LoRA 采用 InfoNCE 对比学习 | 已实现 | `scripts/train_query_tower_lora.py` `scripts/build_query_tower_training_data.py` | 可以直接讲 |
 | 输入为 `(query, 正确文档, 易混淆错误文档)` | 已实现 | `data/train/query_tower_lora_template.jsonl` `scripts/build_query_tower_training_data.py` | 可以直接讲 |
-| 训练前后 baseline 对比 | 已实现 | `scripts/compare_query_tower_baseline.py` | 可以直接讲脚本闭环 |
-| Single-Step Recall@5 / NDCG@10 / MRR@10 before/after | 已实现评测入口，结果待跑 | `scripts/compare_query_tower_baseline.py` | 可讲“支持统计”，不要编造数值 |
-| No Retrieval -> Single-Step 升级率 | 已实现评测入口 | `scripts/compute_route_upgrade_stats.py` `scripts/compare_route_upgrade_baseline.py` | 可讲“支持统计” |
-| Single-Step -> Multi-Hop 升级率 | 已实现评测入口 | `scripts/compute_route_upgrade_stats.py` `scripts/compare_route_upgrade_baseline.py` | 可讲“支持统计” |
-| BEIR nfcorpus benchmark | 脚手架已实现，结果待跑 | `scripts/run_beir_nfcorpus_eval.py` | 可讲“已接入 benchmark 入口” |
-| Synthetic Test Set + ROUGE-L + BERTScore | 脚手架已实现，结果待跑 | `scripts/evaluate_synthetic_generation.py` `graph/generation_metrics.py` | 可讲“已补齐评测框架” |
-| MCP 协议接入 | 已实现第一版 | `graph/mcp/client.py` `graph/mcp/registry.py` `graph/mcp/transports.py` | 可以直接讲“支持 stdio MCP transport” |
+| 训练前后基线对比 | 已实现 | `scripts/compare_query_tower_baseline.py` | 可以直接讲脚本闭环 |
+| 单步检索路线的 Recall@5 / NDCG@10 / MRR@10 训练前后对比 | 已实现评测入口，结果待跑 | `scripts/compare_query_tower_baseline.py` | 可讲“支持统计”，不要编造数值 |
+| 直答升级到单步检索的比例 | 已实现评测入口 | `scripts/compute_route_upgrade_stats.py` `scripts/compare_route_upgrade_baseline.py` | 可讲“支持统计” |
+| 单步检索升级到多跳推理的比例 | 已实现评测入口 | `scripts/compute_route_upgrade_stats.py` `scripts/compare_route_upgrade_baseline.py` | 可讲“支持统计” |
+| BEIR nfcorpus 基准评测 | 脚手架已实现，结果待跑 | `scripts/run_beir_nfcorpus_eval.py` | 可讲“已接入评测入口” |
+| 合成测试集 + ROUGE-L + BERTScore | 脚手架已实现，结果待跑 | `scripts/evaluate_synthetic_generation.py` `graph/generation_metrics.py` | 可讲“已补齐评测框架” |
+| MCP 协议接入 | 已实现第一版 | `graph/mcp/client.py` `graph/mcp/registry.py` `graph/mcp/transports.py` | 可以直接讲“支持 stdio MCP 传输层” |
 | 版本化医学语料治理 | 已实现第一版 | `graph/corpus_profiles.py` `graph/corpus_pipeline.py` `data/corpus/medical_demo/v1/manifest.json` | 可以直接讲 |
 
 ### 12.1 当前可以非常稳地讲的内容
@@ -982,12 +982,12 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 - 高风险医学问题禁止直答
 - HyDE
 - BM25 + BGE-M3 + RRF
-- BGE-M3 reranker
+- BGE-M3 重排层
 - Tavily + PubMed + 医学白名单
 - ChromaDB
-- MCP stdio transport
+- MCP stdio 传输层
 - 版本化语料治理
-- Query tower LoRA 的训练闭环
+- 查询塔 LoRA 的训练闭环
 
 ### 12.2 当前要诚实讲成“脚手架已就绪”的内容
 
@@ -1068,7 +1068,7 @@ MCP 在当前系统中承担的不是“核心推理算法”角色，而是“�
 
 ### 14.1 建库
 
-先准备 corpus profile，并运行：
+先准备语料配置，并运行：
 
 ```bash
 python ingestion.py
@@ -1076,9 +1076,9 @@ python ingestion.py
 
 作用：
 
-- 把当前 `medical_demo` profile 的 serving 语料建入 ChromaDB
+- 把当前 `medical_demo` 语料配置的在线服务语料建入 ChromaDB
 
-### 14.2 查看语料 manifest
+### 14.2 查看语料清单
 
 ```bash
 python scripts/describe_corpus_manifest.py --profile medical_demo
@@ -1086,9 +1086,9 @@ python scripts/describe_corpus_manifest.py --profile medical_demo
 
 作用：
 
-- 确认当前语料版本、资产路径、serve/eval 分层是否正确
+- 确认当前语料版本、资产路径、在线服务与离线评测分层是否正确
 
-### 14.3 训练前检索 baseline
+### 14.3 训练前检索基线
 
 ```bash
 python scripts/retrieval_eval.py --dataset data/eval/medical_retrieval_eval_template.jsonl
@@ -1096,9 +1096,9 @@ python scripts/retrieval_eval.py --dataset data/eval/medical_retrieval_eval_temp
 
 作用：
 
-- 拿到当前 single-step 路线的 baseline
+- 拿到当前单步检索路线的基线
 
-### 14.4 构造 Query Tower 训练数据
+### 14.4 构造查询塔训练数据
 
 ```bash
 python scripts/build_query_tower_training_data.py
@@ -1106,9 +1106,9 @@ python scripts/build_query_tower_training_data.py
 
 作用：
 
-- 从种子 query 和当前语料中构造三元组训练样本
+- 从种子查询和当前语料中构造三元组训练样本
 
-### 14.5 训练 Query Tower LoRA
+### 14.5 训练查询塔 LoRA
 
 ```bash
 python scripts/train_query_tower_lora.py --config configs/query_tower_lora.example.json
@@ -1116,7 +1116,7 @@ python scripts/train_query_tower_lora.py --config configs/query_tower_lora.examp
 
 作用：
 
-- 基于 InfoNCE 三元组训练 query tower adapter
+- 基于 InfoNCE 三元组训练查询塔适配器
 
 ### 14.6 训练前后对比
 
@@ -1126,7 +1126,7 @@ python scripts/compare_query_tower_baseline.py --dataset data/eval/medical_retri
 
 作用：
 
-- 对比 query tower 微调前后的 `Recall@5 / NDCG@10 / MRR@10`
+- 对比查询塔微调前后的 `Recall@5 / NDCG@10 / MRR@10`
 
 ### 14.7 路由升级率对比
 
@@ -1147,7 +1147,7 @@ python scripts/compare_training_before_after.py --retrieval-dataset data/eval/me
 
 作用：
 
-- 用一份报告回答“为什么要训、baseline 是多少、提升来自哪里”
+- 用一份报告回答“为什么要训、基线是多少、提升来自哪里”
 
 ---
 
@@ -1161,12 +1161,12 @@ python scripts/compare_training_before_after.py --retrieval-dataset data/eval/me
 2. 医学风险守卫
 3. 混合检索
 4. HyDE
-5. reranker
+5. 重排层
 6. 自适应重试
 7. Tavily + PubMed + 医学白名单
-8. MCP transport
+8. MCP 传输层
 9. 版本化语料
-10. Query tower LoRA 闭环
+10. 查询塔 LoRA 闭环
 11. 检索/路由/生成评测入口
 
 ### 15.2 当前还没有完成的事情
@@ -1181,7 +1181,7 @@ python scripts/compare_training_before_after.py --retrieval-dataset data/eval/me
 
 当前最准确、最稳妥的总述应该是：
 
-> 这个仓库已经从原始 Agentic Adaptive RAG 演进为一个医学域自适应 RAG 框架。系统保留了 Query Router 的三级动态路由机制，并在此基础上补充了医学风险守卫、混合检索、HyDE、BGE-M3 reranker、Tavily/PubMed 外部补证、MCP stdio transport、版本化语料治理，以及 BGE-M3 query tower LoRA 的训练与评测闭环。当前框架级能力已基本落地，下一步主要是补齐真实 benchmark 和训练结果数值。
+> 这个仓库已经从原始 Agentic Adaptive RAG 演进为一个医学域自适应 RAG 框架。系统保留了 Query Router 的三级动态路由机制，并在此基础上补充了医学风险守卫、混合检索、HyDE、BGE-M3 重排层、Tavily / PubMed 外部补证、MCP stdio 传输层、版本化语料治理，以及 BGE-M3 查询塔 LoRA 的训练与评测闭环。当前框架级能力已基本落地，下一步主要是补齐真实基准评测和训练结果数值。
 
 ---
 
@@ -1189,9 +1189,9 @@ python scripts/compare_training_before_after.py --retrieval-dataset data/eval/me
 
 如果后续继续往“更强的可展示版本”推进，建议优先级如下：
 
-### 16.1 Citation 机制
+### 16.1 引用标注机制
 
-当前生成上下文已经带有标题、来源、URL、rerank score，但还没有把答案输出成真正的 citation 风格。
+当前生成上下文已经带有标题、来源、URL、重排分数，但还没有把答案输出成真正的引用标注风格。
 
 这一步很值得做，因为它会直接提升：
 
@@ -1203,19 +1203,19 @@ python scripts/compare_training_before_after.py --retrieval-dataset data/eval/me
 
 当前虽然有 HyDE，但还没有单独的医学缩写扩展层。
 
-对于医学 query 来说，这会是一个很高 ROI 的增强点。
+对于医学查询来说，这会是一个很高投入产出比的增强点。
 
-### 16.3 Cross-Encoder Reranker
+### 16.3 交叉编码器重排器
 
-当前 reranker 是 BGE-M3 bi-encoder 风格重排。
+当前重排层是 BGE-M3 双编码器风格重排。
 
-后续如果想继续提高精排质量，可以引入 cross-encoder 作为更强但更贵的后处理层。
+后续如果想继续提高精排质量，可以引入交叉编码器作为更强但更贵的后处理层。
 
 ### 16.4 更强的 MCP 治理
 
-当前已有 stdio transport，但还可以继续补：
+当前已有 stdio 传输层，但还可以继续补：
 
-- tool schema 约束
+- 工具模式约束
 - 更细错误恢复
 - 认证与会话管理
 - 统一工具能力目录
@@ -1225,8 +1225,8 @@ python scripts/compare_training_before_after.py --retrieval-dataset data/eval/me
 从“项目成型”走向“简历封版”，最关键的一步已经不是再写代码，而是：
 
 - 跑真实训练
-- 跑真实 benchmark
-- 归档 before/after 报告
+- 跑真实基准评测
+- 归档训练前后报告
 - 固化最终结果表述
 
 ---
@@ -1237,14 +1237,14 @@ python scripts/compare_training_before_after.py --retrieval-dataset data/eval/me
 
 1. `python -m compileall graph scripts ingestion.py model.py`
 2. `scripts/describe_corpus_manifest.py` 可运行
-3. before/after 对比脚本的命令行入口可用
-4. 风险守卫逻辑已做基础 smoke check
+3. 训练前后对比脚本的命令行入口可用
+4. 风险守卫逻辑已做基础冒烟检查
 
 当前还没有完成的验证包括：
 
 1. 真正下载并运行 BGE-M3 相关模型后的完整实验
 2. Tavily API 的联网真实搜索结果
-3. BEIR nfcorpus 的真实 benchmark
+3. BEIR nfcorpus 的真实基准评测
 4. Query tower LoRA 的真实训练与结果收集
 
 ---
@@ -1253,12 +1253,12 @@ python scripts/compare_training_before_after.py --retrieval-dataset data/eval/me
 
 如果把当前仓库放到一句话里概括，它已经可以被定义为：
 
-> 一个基于 LangGraph 的医学域自适应 RAG 系统，保留 Query Router 的三级动态分流结构，通过 HyDE、混合检索、BGE-M3 reranker、风险路由、联网补证与多轮评估重试形成闭环，并进一步补齐了 Query Tower LoRA、MCP stdio transport、版本化语料治理和 before/after benchmark 闭环。
+> 一个基于 LangGraph 的医学域自适应 RAG 系统，保留 Query Router 的三级动态分流结构，通过 HyDE、混合检索、BGE-M3 重排层、风险路由、联网补证与多轮评估重试形成闭环，并进一步补齐了查询塔 LoRA、MCP stdio 传输层、版本化语料治理和训练前后评测闭环。
 
 如果把它放到“简历是否站得住”的角度总结，则更准确的说法是：
 
 - `系统框架和模块能力`：已经基本站住
-- `训练与 benchmark 方法论`：已经站住
+- `训练与基准评测方法论`：已经站住
 - `真实实验数值`：下一步需要实跑补齐
 
 这也是当前最诚实、最有说服力、最适合继续往下推进的状态。
