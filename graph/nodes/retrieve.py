@@ -3,6 +3,8 @@ from typing import Any, Dict, List
 from langchain.schema import Document
 
 from graph.chains.hyde import hypothetical_document_chain
+from graph.consts import RERANK_TOP_K
+from graph.rerankers import get_bge_m3_reranker
 from graph.state import GraphState
 from ingestion import get_hybrid_retriever, normalize_queries
 
@@ -38,7 +40,20 @@ def retrieve(state: GraphState) -> Dict[str, Any]:
 
     retriever = get_hybrid_retriever()
     new_documents = retriever.invoke(retrieval_queries)
-    documents = _merge_documents(state.get("documents", []), new_documents)
+    for retrieval_rank, document in enumerate(new_documents, start=1):
+        document.metadata = {
+            **(document.metadata or {}),
+            "retrieval_rank": retrieval_rank,
+            "retrieval_query": state.get("rewritten_question", state["question"]),
+        }
+
+    merged_documents = _merge_documents(state.get("documents", []), new_documents)
+    reranker = get_bge_m3_reranker()
+    documents = reranker.rerank(
+        state.get("rewritten_question", state["question"]),
+        merged_documents,
+        top_k=RERANK_TOP_K,
+    )
 
     return {
         "documents": documents,
@@ -47,4 +62,5 @@ def retrieve(state: GraphState) -> Dict[str, Any]:
         "retrieval_queries": base_queries,
         "sub_queries": [],
         "retrieval_round": state.get("retrieval_round", 0) + 1,
+        "rerank_applied": True,
     }

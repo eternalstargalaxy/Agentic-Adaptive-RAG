@@ -50,12 +50,14 @@
 当前状态：
 
 - 已实现
+- 已补充风险路由层，高风险医学问题禁止直接走 `No Retrieval`
 
 模块位置：
 
 - 路由策略定义：`graph/consts.py`
 - 路由判断：`graph/chains/router.py`
 - 路由结果写入 state：`graph/nodes/rewrite_query.py`
+- 风险守卫：`graph/risk_guardrails.py`
 - 图结构分流：`graph/graph.py`
 - single-step 与 multi-hop 分化：`graph/nodes/grade_documents.py`
 - no-retrieval 失败后升级为 single-step：`graph/nodes/evaluate_generation.py`
@@ -65,6 +67,7 @@
 
 - 这是系统智能化的核心。
 - 它让系统能根据问题复杂度，选择最合适的成本与可靠性平衡点。
+- 在此基础上又加了一层 `risk guardrail`，当问题涉及诊断、治疗、药物联用、剂量、禁忌、急症症状等高风险医学信号时，即便 LLM router 初判为 `No Retrieval`，系统也会强制升级到至少 `Single-Step`。
 - 同时保留了强叙事性：
   - 简单问题快答
   - 简单事实单步检索
@@ -86,7 +89,7 @@
 - 对短 query、模糊 query、医学术语不完整 query，生成假设性文档来扩大召回空间。
 - 这对症状描述类和缩写类 query 特别重要。
 
-### 3.3 单轮混合检索：BM25 + BGE-M3 + RRF
+### 3.3 单轮混合检索：BM25 + BGE-M3 + RRF + BGE-M3 Rerank
 
 当前状态：
 
@@ -96,6 +99,9 @@
 
 - 本地向量库与检索基座：`ingestion.py`
 - 稠密 embedding：`graph/embeddings/bge_m3.py`
+- reranker：`graph/rerankers/bge_m3.py`
+- 检索后重排接入：`graph/nodes/retrieve.py`
+- single-step 文档筛选：`graph/nodes/grade_documents.py`
 - embedding 接入：`model.py`
 
 作用说明：
@@ -103,21 +109,26 @@
 - `BM25` 负责关键词、医学术语、缩写匹配。
 - `BGE-M3` 负责语义召回。
 - `RRF` 融合两路召回结果，降低单一检索路径的偏置。
+- 新增的 `BGE-M3 reranker` 会对混合召回后的候选文档再次按 query-doc 相似度重排。
+- `Single-Step` 现在不再是“LLM 逐篇筛文档”，而是“混合检索 -> BGE-M3 rerank -> 仅在不确定时调用少量 LLM 判别”，因此更贴近低时延、高性价比的设计目标。
 
 ### 3.4 ChromaDB 本地向量库
 
 当前状态：
 
 - 已实现
+- 已与版本化 corpus pipeline 对齐
 
 模块位置：
 
 - `ingestion.py`
+- `graph/corpus_pipeline.py`
+- `data/corpus/medical_demo/v1/manifest.json`
 
 作用说明：
 
 - 提供本地持久化向量存储。
-- 支持不同 corpus profile 的独立 collection。
+- 支持不同 corpus profile 和不同 `corpus_version` 的独立 collection。
 - 与当前混合检索和后续 query tower LoRA 推理保持兼容。
 
 ### 3.5 多轮信息缺口分析与自适应重试
@@ -195,17 +206,21 @@
 
 当前状态：
 
-- 已实现第一阶段 client 抽象
+- 已实现 client 抽象
+- 已补充真实 `stdio MCP transport`
 
 模块位置：
 
 - `graph/mcp/client.py`
 - `graph/mcp/registry.py`
+- `graph/mcp/transports.py`
+- `configs/mcp_stdio.example.env`
 
 作用说明：
 
-- 当前还不是完整的分布式 MCP server 方案，但已经把工具调用抽象成统一边界。
-- 后续如果切换到真正的 MCP transport，不需要重写 graph 主逻辑。
+- 当前保留了 in-process handler 方案，保证仓库默认可运行。
+- 同时已经支持通过 `MCP_STDLIO_SERVER_COMMAND / MCP_STDLIO_SERVER_ARGS / MCP_STDLIO_TOOL_ALIASES` 接入真实 stdio MCP server。
+- 这意味着图内工具调用不再只能依赖本地 handler，而是已经具备向真实 MCP transport 迁移的工程边界。
 
 ### 3.9 RAGAS Faithfulness 优先评估
 
@@ -330,6 +345,28 @@
 - `scripts/compare_training_before_after.py` 会把 `Single-Step` 的 `Recall@5 / NDCG@10 / MRR@10`，以及 `No Retrieval -> Single-Step`、`Single-Step -> Multi-Hop` 两类升级率汇总到同一份 JSON 的 `focus_summary` 中，直接回答“训前 baseline 是多少、训后提升了多少”。
 - `route_history` 被加入到 LangGraph state 后，这个升级统计基于真实执行路径，而不是静态推断。
 
+### 3.14 版本化语料治理与资产分层
+
+当前状态：
+
+- 已实现第一版版本化 corpus pipeline
+
+模块位置：
+
+- profile 定义：`graph/corpus_profiles.py`
+- manifest 解析：`graph/corpus_pipeline.py`
+- 版本化 manifest：`data/corpus/medical_demo/v1/manifest.json`
+- 指南页资产：`data/corpus/medical_demo/v1/guideline_pages.jsonl`
+- PubMed 摘要资产：`data/corpus/medical_demo/v1/pubmed_abstracts.jsonl`
+- nfcorpus 评测资产：`data/corpus/medical_demo/v1/nfcorpus_eval_registry.jsonl`
+- manifest 查看脚本：`scripts/describe_corpus_manifest.py`
+
+作用说明：
+
+- 语料不再只是 profile 中的几条启动 URL，而是升级为“profile + version + asset manifest”的治理方式。
+- 当前已把 serving 语料拆为 `guideline_pages` 和 `pubmed_abstracts`，同时把 `nfcorpus` 评测资产单独归档为 `eval` 用途，避免 serving corpus 和 eval corpus 混用。
+- Chroma collection 名称和持久化目录也已经纳入 `corpus_version`，后续可以并行维护 `v1 / v2 / ablation` 等不同语料版本。
+
 ## 4. 简历点逐条对照
 
 下面按你的简历描述逐条核对当前项目状态。
@@ -339,6 +376,7 @@
 当前状态：
 
 - 已实现并保留
+- 已接入高风险医学问题守卫
 
 对应模块：
 
@@ -347,6 +385,7 @@
 - `graph/graph.py`
 - `graph/nodes/evaluate_generation.py`
 - `graph/state.py`
+- `graph/risk_guardrails.py`
 - `scripts/compute_route_upgrade_stats.py`
 
 说明：
@@ -355,6 +394,7 @@
   - `No Retrieval`
   - `Single-Step`
   - `Multi-Hop`
+- 且高风险医学问题不会被允许以 `No Retrieval` 直答落地。
 
 ### 4.2 针对短/模糊 Query 使用 HyDE
 
@@ -390,20 +430,24 @@
 
 - 已实现基础结构
 - 已接入 BGE-M3 双塔 embedding
+- 已接入 BGE-M3 rerank
 - 已落地 query tower LoRA 训练入口
 - 真实微调结果仍需在本地或服务器训练后验证
 
 对应模块：
 
 - embedding：`graph/embeddings/bge_m3.py`
+- reranker：`graph/rerankers/bge_m3.py`
 - ChromaDB + hybrid retrieval：`ingestion.py`
+- 检索节点：`graph/nodes/retrieve.py`
+- 文档筛选节点：`graph/nodes/grade_documents.py`
 - 训练数据构造：`scripts/build_query_tower_training_data.py`
 - LoRA 训练：`scripts/train_query_tower_lora.py`
 - 训练前后对比：`scripts/compare_query_tower_baseline.py`
 
 说明：
 
-- 当前 single-step 路线不会进入 multi-hop gap analysis，而是走单轮检索后直接生成。
+- 当前 single-step 路线不会进入 multi-hop gap analysis，而是走“单轮混合检索 -> BGE-M3 rerank -> 少量 LLM 判别 -> 生成”。
 - 这里的“微调后”当前已经对应到 `BGE-M3 query tower LoRA` 的训练脚手架。
 - 训练方式明确为 `InfoNCE` 三元组对比学习。
 
@@ -500,6 +544,67 @@
 - 输出：`3 个向量`
 - 目标：让模型分得清医学易混淆知识
 
+### 4.12 MCP 协议接入
+
+当前状态：
+
+- 已从纯抽象层升级到“抽象层 + 真实 stdio transport”
+
+对应模块：
+
+- `graph/mcp/client.py`
+- `graph/mcp/registry.py`
+- `graph/mcp/transports.py`
+
+说明：
+
+- 当前默认仍可使用本地 in-process 工具。
+- 若配置外部 MCP server，则可通过 stdio 方式把远程工具接入同一调用边界。
+
+### 4.13 版本化医学语料治理
+
+当前状态：
+
+- 已实现第一版
+
+对应模块：
+
+- `graph/corpus_profiles.py`
+- `graph/corpus_pipeline.py`
+- `data/corpus/medical_demo/v1/manifest.json`
+- `data/corpus/medical_demo/v1/guideline_pages.jsonl`
+- `data/corpus/medical_demo/v1/pubmed_abstracts.jsonl`
+- `data/corpus/medical_demo/v1/nfcorpus_eval_registry.jsonl`
+
+说明：
+
+- 当前已经把 `PubMed 摘要`、`指南页`、`nfcorpus eval 资产` 分开治理。
+- 这部分主要解决“服务语料”和“评测语料”混用的问题，也为后续迭代 corpus version 打基础。
+
+### 4.14 当前简历点覆盖结论
+
+结论：
+
+- 你简历中描述的系统性能力点，当前已经基本完成工程落地：
+  - 动态路由
+  - HyDE
+  - BGE-M3 + BM25 + RRF
+  - ChromaDB
+  - Tavily API
+  - PubMed / 医学网页 / 通用网页工具分层
+  - RAGAS faithfulness
+  - Query tower LoRA（InfoNCE）
+  - 训练前后 baseline 对比
+  - 升级率统计
+  - 风险路由层
+  - BGE-M3 reranker
+  - 真实 stdio MCP transport
+  - 版本化语料治理
+- 目前还没有完全闭环的，是“真实实验结果数值”而不是“框架模块是否存在”：
+  - `BEIR nfcorpus` 真实分数
+  - `Synthetic generation` 真实分数
+  - `Query tower LoRA` 真实训练后分数
+
 ## 5. 为什么当前阶段仍然先做 LoRA，以及如何回答“为什么要训、baseline 是多少、提升来自哪里”
 
 当前更推荐的顺序是：
@@ -518,6 +623,7 @@
    - `No Retrieval -> Single-Step` 的升级比例
    - `Single-Step -> Multi-Hop` 的升级比例
 6. 如果 LoRA 提升有限，再考虑更复杂的 adaptive 方案
+7. 在继续堆更多 agent 之前，优先补 `reranker` 和 `risk route` 往往更高 ROI，因为它们直接改善首轮证据质量和医疗安全边界
 
 原因：
 
@@ -542,7 +648,7 @@
 2. `BEIR nfcorpus` 还没有产出真实 benchmark 数值
 3. `Synthetic generation eval` 还没有产出真实 `ROUGE-L / BERTScore` 数值
 4. 还没有单独的 `医学缩写扩展模块`
-5. 还没有 `cross-encoder reranker`
+5. 已实现 `BGE-M3 bi-encoder reranker`，但还没有 `cross-encoder reranker`
 6. 还没有完整的 `citation 展示机制`
 
 也就是说：
@@ -559,6 +665,8 @@
 1. `python -m compileall .`
 2. 纯逻辑 smoke test：
    - corpus profile
+   - corpus manifest
+   - risk guardrail
    - retrieval metrics
    - 路由相关状态分流逻辑
 
@@ -587,5 +695,5 @@
 7. 或直接运行 `scripts/compare_training_before_after.py`，一并生成训练前/训练后总报告
 8. 如果 single-step 提升稳定，再补：
    - 缩写扩展
-   - reranker
+   - cross-encoder reranker
    - citation

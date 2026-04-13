@@ -12,6 +12,7 @@ from langchain_chroma import Chroma
 from langchain_community.document_loaders import WebBaseLoader
 from langchain_community.retrievers import BM25Retriever
 
+from graph.corpus_pipeline import load_corpus_documents
 from graph.corpus_profiles import CorpusProfile, get_active_corpus_profile
 from model import embed_model
 
@@ -51,11 +52,11 @@ def _reciprocal_rank_fusion(result_sets: Sequence[Sequence[Document]], k: int = 
 
 
 def _collection_name(profile: CorpusProfile) -> str:
-    return f"rag-chroma-{profile.name}"
+    return f"rag-chroma-{profile.name}-{profile.corpus_version}"
 
 
 def _persist_directory(profile: CorpusProfile) -> Path:
-    return Path("./.chroma") / profile.name
+    return Path("./.chroma") / profile.name / profile.corpus_version
 
 
 def get_collection_name(profile: CorpusProfile | None = None) -> str:
@@ -108,7 +109,9 @@ def get_vectorstore() -> Chroma:
         if existing.get("ids"):
             return vectorstore
 
-    seed_documents = _load_seed_documents(profile.urls)
+    seed_documents = load_corpus_documents(profile, usage="serve")
+    if not seed_documents:
+        seed_documents = _load_seed_documents(profile.urls)
     return Chroma.from_documents(
         documents=seed_documents,
         collection_name=collection_name,
@@ -123,7 +126,11 @@ def get_seed_documents() -> List[Document]:
     documents = _load_documents_from_vectorstore(vectorstore)
     if documents:
         return documents
-    return _load_seed_documents(get_active_corpus_profile().urls)
+    profile = get_active_corpus_profile()
+    manifest_documents = load_corpus_documents(profile, usage="serve")
+    if manifest_documents:
+        return manifest_documents
+    return _load_seed_documents(profile.urls)
 
 
 @dataclass
@@ -204,8 +211,13 @@ def get_local_documents(
 
 def ingest_documents(urls: Sequence[str] | None = None) -> Chroma:
     profile = get_active_corpus_profile()
-    urls = urls or profile.urls
-    documents = _load_seed_documents(urls)
+    manifest_documents = load_corpus_documents(profile, usage="serve")
+    if urls:
+        documents = _load_seed_documents(urls)
+    elif manifest_documents:
+        documents = manifest_documents
+    else:
+        documents = _load_seed_documents(profile.urls)
     return Chroma.from_documents(
         documents=documents,
         collection_name=_collection_name(profile),

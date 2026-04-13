@@ -13,7 +13,12 @@ class GraphState(TypedDict, total=False):
     forced_route_strategy: str
     route_rationale: str
     route_history: List[str]
+    risk_level: str
+    risk_rationale: str
+    risk_signals: List[str]
     corpus_profile: str
+    corpus_version: str
+    corpus_manifest_path: str
     retrieval_queries: List[str]
     sub_queries: List[str]
     search_query: str
@@ -25,6 +30,8 @@ class GraphState(TypedDict, total=False):
     retrieval_round: int
     retry_count: int
     next_action: str
+    rerank_applied: bool
+    screening_mode: str
     evaluation: Dict[str, Any]
 
 

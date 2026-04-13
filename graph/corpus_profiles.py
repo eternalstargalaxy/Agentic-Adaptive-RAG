@@ -11,6 +11,8 @@ class CorpusProfile:
     name: str
     display_name: str
     description: str
+    corpus_version: str
+    manifest_path: str
     routing_topics: Tuple[str, ...]
     preferred_search_tools: Tuple[str, ...]
     urls: Tuple[str, ...]
@@ -24,6 +26,8 @@ GENERAL_AI_PROFILE = CorpusProfile(
         "面向 AI agents、prompt engineering、对抗攻击和 agentic RAG 设计模式的"
         "通用技术语料。"
     ),
+    corpus_version="v0",
+    manifest_path="",
     routing_topics=(
         "AI agent",
         "agent memory",
@@ -45,9 +49,11 @@ MEDICAL_DEMO_PROFILE = CorpusProfile(
     name="medical_demo",
     display_name="医学检索增强 RAG",
     description=(
-        "面向医学问答和临床知识检索的启动语料。当前版本优先接入高可信公开医疗页面，"
-        "为后续 PubMed、nfcorpus 和医学问答评测打底。"
+        "面向医学问答和临床知识检索的版本化语料。当前版本将服务语料拆分为"
+        "指南页和 PubMed 摘要，并将 nfcorpus 评测资产独立治理。"
     ),
+    corpus_version="v1",
+    manifest_path="data/corpus/medical_demo/v1/manifest.json",
     routing_topics=(
         "疾病",
         "症状",

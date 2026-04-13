@@ -53,11 +53,22 @@ def web_search(state: GraphState) -> Dict[str, Any]:
                     tool_name,
                     {"query": query, "max_results": WEB_SEARCH_RESULT_COUNT},
                 )
-            except Exception:
+            except Exception as exc:
+                print(f"---WEB SEARCH TOOL ERROR: {tool_name} failed for query '{query}': {exc}---")
                 continue
 
             hits = result.structured_content.get("results", [])
             if hits:
+                used_tools.append(tool_name)
+            elif result.content:
+                hits = [
+                    {
+                        "content": result.content,
+                        "source": tool_name,
+                        "title": f"{tool_name} response",
+                        "url": "",
+                    }
+                ]
                 used_tools.append(tool_name)
 
             for hit in hits:

@@ -1,0 +1,28 @@
+{
+  "profile_name": "medical_demo",
+  "version": "v1",
+  "description": "Versioned medical corpus with separated serving assets and evaluation-only assets.",
+  "assets": [
+    {
+      "name": "guideline_pages",
+      "kind": "jsonl_documents",
+      "usage": "serve",
+      "path": "guideline_pages.jsonl",
+      "description": "High-trust guideline and patient guidance pages used for serving."
+    },
+    {
+      "name": "pubmed_abstracts",
+      "kind": "jsonl_documents",
+      "usage": "serve",
+      "path": "pubmed_abstracts.jsonl",
+      "description": "Curated PubMed-style abstract snippets used for serving."
+    },
+    {
+      "name": "nfcorpus_eval_registry",
+      "kind": "jsonl_documents",
+      "usage": "eval",
+      "path": "nfcorpus_eval_registry.jsonl",
+      "description": "Evaluation-only asset registry kept separate from the serving corpus."
+    }
+  ]
+}

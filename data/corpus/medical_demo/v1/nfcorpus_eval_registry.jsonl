@@ -1,0 +1,2 @@
+{"doc_id":"nfcorpus_eval_001","title":"nfcorpus registry record 1","content":"Evaluation-only placeholder registry entry for nfcorpus style retrieval benchmarking. This asset is intentionally separated from the serving corpus.","source":"nfcorpus_eval_registry","url":""}
+{"doc_id":"nfcorpus_eval_002","title":"nfcorpus registry record 2","content":"Another evaluation-only placeholder entry used to document the versioned corpus split between serving and evaluation assets.","source":"nfcorpus_eval_registry","url":""}

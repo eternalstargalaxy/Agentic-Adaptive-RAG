@@ -40,6 +40,8 @@ Use exactly one of these three strategies:
   parametric knowledge without retrieval.
 - Prefer this only when the question is low-risk, direct, and does not require
   fresh or evidence-backed lookup.
+- High-risk medical questions about diagnosis, treatment, medication choice,
+  drug interaction, contraindication, or emergency symptoms must not use this.
 
 2. {SINGLE_STEP}
 - Use this for simple factual lookup questions that can likely be answered with
